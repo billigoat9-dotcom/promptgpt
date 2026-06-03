@@ -1,0 +1,9 @@
+{
+  "username": "Gaurav@Harsh",
+  "passwordHash": "39eb67d61b87237f872283b2c03ec1804d3569d93e0508bf3b0ada56784298a9",
+  "passwordSalt": "18c664c5ffff7ab3f8565a689c09b35a",
+  "passwordUpdatedAt": "2026-05-31T09:47:02.305Z",
+  "twoFactorEnabled": false,
+  "twoFactorPendingSecret": "AROX4NSDNNXHCXKD",
+  "twoFactorPendingCreatedAt": "2026-06-03T09:40:28.079Z"
+}
