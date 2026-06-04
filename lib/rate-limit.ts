@@ -16,8 +16,8 @@ let redisClient: RedisClientType | null = null;
 let redisReady: Promise<void> | null = null;
 const fallbackStore = new Map<string, { count: number; resetAt: number }>();
 
-async function getRedisClient() {
-  const redisUrl = process.env.REDIS_URL;
+export async function getRedisClient() {
+  const redisUrl = process.env.REDIS_URL || process.env.KV_URL || process.env.UPSTASH_REDIS_URL;
 
   if (!redisUrl) {
     return null;

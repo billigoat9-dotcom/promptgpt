@@ -182,10 +182,11 @@ export default function AdminDashboard() {
       console.log('Add prompt response status:', res.status, 'data:', data);
 
       if (res.ok && data.success) {
-        const msg = data.warning 
-          ? `✅ Prompt added (this request only). ${data.warning}`
-          : '✅ Prompt added successfully! Image uploaded to Cloudinary.';
-        alert(msg);
+        if (data.warning) {
+          alert(data.warning);
+        } else {
+          alert('✅ Prompt added successfully! Image uploaded to Cloudinary.');
+        }
         resetAddForm();
         await fetchPrompts();
         setActiveTab('manage');
@@ -239,7 +240,7 @@ export default function AdminDashboard() {
         await fetchPrompts();
         cancelEdit();
         const data = await res.json().catch(() => ({}));
-        alert(data.warning ? `Prompt updated (this request only). ${data.warning}` : 'Prompt updated successfully');
+        alert(data.warning ? data.warning : 'Prompt updated successfully');
       } else {
         const err = await res.json();
         alert(err.error || 'Failed to update');
@@ -255,8 +256,9 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`/api/admin/prompts/${id}`, { method: 'DELETE' });
       if (res.ok) {
+        const data = await res.json().catch(() => ({}));
         await fetchPrompts();
-        alert('Prompt deleted');
+        alert(data.warning ? data.warning : 'Prompt deleted');
       } else {
         alert('Failed to delete prompt');
       }

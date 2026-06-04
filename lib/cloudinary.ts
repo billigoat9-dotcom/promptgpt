@@ -1,8 +1,12 @@
 import { v2 as cloudinary } from 'cloudinary';
 import dotenv from 'dotenv';
+import { Prompt } from './types';
 
-// Load .env.local explicitly (safe for both Next.js and scripts)
-dotenv.config({ path: '.env.local' });
+// Load .env.local explicitly only if not running on Vercel (where platform env vars are injected)
+// and only if Cloudinary vars aren't already present (Next.js loads .env* automatically for the app).
+if (!process.env.VERCEL && !process.env.CLOUDINARY_CLOUD_NAME) {
+  dotenv.config({ path: '.env.local' });
+}
 
 let cloudinaryConfigured = false;
 
@@ -15,8 +19,11 @@ function ensureCloudinaryConfigured() {
 
   if (!cloudName || !apiKey || !apiSecret) {
     throw new Error(
-      'Cloudinary credentials are missing. Please check your .env.local file has:\n' +
-      'CLOUDINARY_CLOUD_NAME\nCLOUDINARY_API_KEY\nCLOUDINARY_API_SECRET'
+      'Cloudinary credentials are missing. Please ensure the following environment variables are set:\n' +
+      'CLOUDINARY_CLOUD_NAME\nCLOUDINARY_API_KEY\nCLOUDINARY_API_SECRET\n\n' +
+      '• Local development (.env.local) mein daalo\n' +
+      '• Vercel dashboard mein Project Settings → Environment Variables mein daalo\n' +
+      '  → Production, Preview aur Development teeno environments select karke same values daal do'
     );
   }
 
@@ -72,4 +79,46 @@ export async function uploadToCloudinary(
 
     uploadStream.end(buffer);
   });
+}
+
+export async function uploadPromptsData(prompts: Prompt[]): Promise<void> {
+  try {
+    ensureCloudinaryConfigured();
+  } catch (configError: any) {
+    console.error('❌ Cloudinary configuration error for prompts data:', configError.message);
+    throw configError;
+  }
+
+  const jsonString = JSON.stringify(prompts, null, 2);
+  const base64 = Buffer.from(jsonString).toString('base64');
+  const dataUri = `data:application/json;base64,${base64}`;
+
+  await cloudinary.uploader.upload(dataUri, {
+    resource_type: 'raw',
+    public_id: 'prompts/data',
+    overwrite: true,
+  });
+}
+
+export async function getPromptsData(): Promise<Prompt[] | null> {
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+  if (!cloudName) {
+    return null;
+  }
+
+  const url = `https://res.cloudinary.com/${cloudName}/raw/upload/prompts/data?_=${Date.now()}`;
+  try {
+    const res = await fetch(url, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' },
+    });
+    if (!res.ok) {
+      return null;
+    }
+    const data = await res.json();
+    return Array.isArray(data) ? data : null;
+  } catch (error) {
+    console.error('❌ Failed to fetch prompts data from Cloudinary:', error);
+    return null;
+  }
 }

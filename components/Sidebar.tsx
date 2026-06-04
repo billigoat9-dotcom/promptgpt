@@ -157,8 +157,8 @@ export default function Sidebar({
       <div className="flex-1" />
 
       {/* Footer */}
-      <div className="p-6 border-t border-white/10 text-[11px] text-white/40">
-        Made for creators.<br />Phase 1 — Full UI
+      <div className="p-6 border-t border-white/10 text-[10px] uppercase tracking-[2px] text-white/50">
+        made for you
       </div>
     </div>
   );

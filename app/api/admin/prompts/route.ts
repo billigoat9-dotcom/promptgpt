@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth';
-import { addPrompt, isVercelProd } from '@/lib/prompts';
+import { addPrompt, isPromptsPersistent } from '@/lib/prompts';
 import { uploadToCloudinary } from '@/lib/cloudinary';
 import { checkRateLimit, getClientRateLimitKey } from '@/lib/rate-limit';
 import { writeAuditEvent } from '@/lib/audit';
@@ -124,11 +124,12 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    const persistent = await isPromptsPersistent();
     return NextResponse.json({ 
       success: true, 
       prompt: newPrompt,
-      warning: isVercelProd 
-        ? 'Prompt added for this request only. On Vercel (read-only filesystem) changes do not persist after the serverless function ends. For permanent changes run the site locally or add a database.'
+      warning: !persistent 
+        ? 'Prompt added for this request only. (No Cloudinary/Redis configured for data persistence on Vercel). Use Cloudinary creds (already needed for images) - it will now store prompts data too as raw JSON.'
         : undefined
     });
 

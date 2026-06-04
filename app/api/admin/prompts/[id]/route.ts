@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth';
-import { getAllPrompts, savePrompts, isVercelProd } from '@/lib/prompts';
+import { getAllPrompts, savePrompts, isPromptsPersistent } from '@/lib/prompts';
 import { checkRateLimit, getClientRateLimitKey } from '@/lib/rate-limit';
 import { writeAuditEvent } from '@/lib/audit';
 
@@ -82,11 +82,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       },
     });
 
+    const persistent = await isPromptsPersistent();
     return NextResponse.json({ 
       success: true, 
       prompt: updatedPrompt,
-      warning: isVercelProd 
-        ? 'Change applied for this request only. On Vercel deployments prompt data is read-only (no persistence).'
+      warning: !persistent 
+        ? 'Change applied for this request only. (No Cloudinary/Redis for data). Prompts data will use Cloudinary raw JSON if creds present (same as images).'
         : undefined
     });
   } catch (error: any) {
@@ -139,10 +140,11 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       userAgent: request.headers.get('user-agent') || undefined,
       details: { promptId: id },
     });
+    const persistent = await isPromptsPersistent();
     return NextResponse.json({ 
       success: true,
-      warning: isVercelProd 
-        ? 'Delete applied for this request only. On Vercel deployments prompt data is read-only (no persistence).'
+      warning: !persistent 
+        ? 'Delete applied for this request only. (No Cloudinary/Redis for data). Prompts data will use Cloudinary raw JSON if creds present (same as images).'
         : undefined
     });
   } catch (error: any) {
