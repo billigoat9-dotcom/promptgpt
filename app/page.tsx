@@ -46,7 +46,11 @@ export default function PromptGpt() {
   useEffect(() => {
     async function loadData() {
       try {
-        const promptsRes = await fetch('/api/prompts');
+        // Strong bust for the data API (the server itself will also bust Cloudinary)
+        const promptsRes = await fetch('/api/prompts?ts=' + Date.now(), {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' },
+        });
 
         if (promptsRes.ok) {
           const data = await promptsRes.json();

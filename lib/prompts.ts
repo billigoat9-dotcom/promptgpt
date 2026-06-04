@@ -31,7 +31,14 @@ export async function getAllPrompts(): Promise<Prompt[]> {
   if (hasCloudinaryCreds) {
     try {
       const cloudData = await getPromptsData();
-      if (cloudData && Array.isArray(cloudData) && cloudData.length > 0) {
+      if (cloudData === 'NO_DATA_FILE') {
+        // No data file on Cloudinary yet. Return empty so that:
+        // - Public starts empty until first write (which will enrich with initials, see savePrompts).
+        // - We never overwrite a just-performed write due to a transient 404 right after upload.
+        console.log('Cloudinary prompts/data.json does not exist yet (first run or after delete-all).');
+        return [];
+      }
+      if (cloudData !== null && Array.isArray(cloudData)) {
         return cloudData;
       }
     } catch (error) {
@@ -107,8 +114,31 @@ export async function getAllPrompts(): Promise<Prompt[]> {
 export async function savePrompts(prompts: Prompt[]): Promise<void> {
   const hasCloudinaryCreds = !!process.env.CLOUDINARY_CLOUD_NAME && !!process.env.CLOUDINARY_API_KEY && !!process.env.CLOUDINARY_API_SECRET;
   if (hasCloudinaryCreds) {
+    let toUpload = prompts;
     try {
-      await uploadPromptsData(prompts);
+      // If Cloudinary currently has no data (or empty), enrich the list we're about to write
+      // with any "initial / bundled" prompts from the committed local file. This preserves
+      // the starting gallery on first use after deploy, without causing read-triggered clobbers.
+      const current = await getPromptsData();
+      if (current === 'NO_DATA_FILE' || (Array.isArray(current) && current.length === 0)) {
+        await ensureDataDir();
+        const localRaw = await fs.readFile(DATA_FILE, 'utf-8').catch(() => '[]');
+        const local = JSON.parse(localRaw);
+        if (Array.isArray(local) && local.length > 0) {
+          const have = new Set((toUpload || []).map((p: Prompt) => p.id));
+          const missing = local.filter((p: Prompt) => !have.has(p.id));
+          if (missing.length > 0) {
+            toUpload = [...(toUpload || []), ...missing];
+            console.log('Enriched save list with', missing.length, 'initial prompts from local file (cloud was empty).');
+          }
+        }
+      }
+    } catch (enrichErr) {
+      console.warn('Non-fatal: could not enrich save list from local on empty cloud:', enrichErr);
+    }
+
+    try {
+      await uploadPromptsData(toUpload);
       return;
     } catch (error) {
       console.error('Cloudinary prompts data upload error, falling back:', error);

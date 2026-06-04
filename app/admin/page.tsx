@@ -67,7 +67,10 @@ export default function AdminDashboard() {
   // Fetch data
   const fetchPrompts = async () => {
     try {
-      const res = await fetch('/api/admin/prompts');
+      const res = await fetch('/api/admin/prompts?ts=' + Date.now(), {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' },
+      });
       if (res.ok) {
         const serverData: Prompt[] = await res.json();
         setPrompts(prev => {
@@ -191,7 +194,7 @@ export default function AdminDashboard() {
         if (data.warning) {
           alert(data.warning);
         } else {
-          alert('✅ Prompt added successfully! Image uploaded to Cloudinary.');
+          alert('✅ Prompt added successfully! Image + data saved to Cloudinary.\n\nNote: Public gallery & Manage list use CDN; new prompt may take 5-30s to appear for all visitors (or click Refresh). Optimistic preview is shown immediately.');
         }
         if (data.prompt) {
           setPrompts(prev => [data.prompt, ...prev.filter(p => p.id !== data.prompt.id)]);
@@ -199,6 +202,9 @@ export default function AdminDashboard() {
         }
         resetAddForm();
         setActiveTab('manage');
+        // Background re-fetch a couple times to pick up server/Cloudinary truth quickly (handles short CDN propagation)
+        setTimeout(() => { fetchPrompts(); }, 1200);
+        setTimeout(() => { fetchPrompts(); }, 4500);
       } else {
         const errorMsg = data.error || rawText || `HTTP ${res.status} - Failed to add prompt`;
         console.error('Add prompt failed:', errorMsg, 'Full response data:', data);

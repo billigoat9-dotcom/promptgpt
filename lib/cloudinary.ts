@@ -93,49 +93,156 @@ export async function uploadPromptsData(prompts: Prompt[]): Promise<void> {
   const base64 = Buffer.from(jsonString).toString('base64');
   const dataUri = `data:application/json;base64,${base64}`;
 
+  // Use a *unique* public_id for every data blob (immutable). This completely avoids
+  // any "overwrite latest alias lag" on Cloudinary's fixed-name delivery path.
+  const uniqueSuffix = Date.now() + '-' + Math.random().toString(36).slice(2, 9);
+  const dataPublicId = `prompts/data-${uniqueSuffix}.json`;
+
   const result = await cloudinary.uploader.upload(dataUri, {
     resource_type: 'raw',
-    public_id: 'prompts/data.json',
+    public_id: dataPublicId,
     overwrite: true,
   });
-  console.log('✅ Prompts data uploaded to Cloudinary:', result.secure_url);
-  // Purge CDN cache so subsequent fetches get the fresh content immediately
+  console.log('✅ Prompts data uploaded to Cloudinary as', dataPublicId, 'version:', result.version);
+
+  // Write/overwrite a small *pointer* that tells readers the current data file name.
+  // The pointer itself is overwritten but being tiny + new name on data, readers get strong consistency quickly.
   try {
-    await cloudinary.api.delete_resources(['prompts/data.json'], {
+    const pointer = JSON.stringify({ current: dataPublicId, updatedAt: new Date().toISOString() });
+    const pB64 = Buffer.from(pointer).toString('base64');
+    const pUri = `data:application/json;base64,${pB64}`;
+    await cloudinary.uploader.upload(pUri, {
       resource_type: 'raw',
+      public_id: 'prompts/data.current.json',
+      overwrite: true,
+    });
+    console.log('✅ Pointer updated: prompts/data.current.json ->', dataPublicId);
+  } catch (e: any) {
+    console.warn('Pointer upload non-critical (will fallback):', e?.message || e);
+  }
+
+  // Also keep the classic fixed public_id in sync (for currently deployed code on Vercel that only knows the old path,
+  // and as a reliable fallback in the new get logic). This guarantees that even if the pointer lags, readers eventually see fresh data.
+  try {
+    await cloudinary.uploader.upload(dataUri, {
+      resource_type: 'raw',
+      public_id: 'prompts/data.json',
+      overwrite: true,
+    });
+    await cloudinary.uploader.explicit('prompts/data.json', {
+      resource_type: 'raw',
+      type: 'upload',
       invalidate: true,
     });
-    console.log('✅ Cloudinary cache purged for prompts data');
-  } catch (e) {
-    console.warn('Cloudinary cache invalidate non-critical error:', e);
+    console.log('✅ Also synced classic fixed prompts/data.json for back-compat + fallback');
+  } catch (e: any) {
+    console.warn('Fixed-name back-compat upload non-critical:', e?.message || e);
+  }
+
+  // Invalidate the pointer (and the unique blob)
+  try {
+    await cloudinary.uploader.explicit('prompts/data.current.json', {
+      resource_type: 'raw',
+      type: 'upload',
+      invalidate: true,
+    });
+    await cloudinary.uploader.explicit(dataPublicId, {
+      resource_type: 'raw',
+      type: 'upload',
+      invalidate: true,
+    });
+    console.log('✅ Invalidated cache for pointer + new data blob');
+  } catch (e: any) {
+    console.warn('Invalidate non-critical:', e?.message || e);
   }
 }
 
-export async function getPromptsData(): Promise<Prompt[] | null> {
+export async function getPromptsData(): Promise<Prompt[] | 'NO_DATA_FILE' | null> {
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
   if (!cloudName) {
     return null;
   }
 
-  const url = `https://res.cloudinary.com/${cloudName}/raw/upload/prompts/data.json?_=${Date.now()}`;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const ts = Date.now();
+
+  // Preferred: read the "current" pointer written by the immutable-blob + pointer scheme.
+  try {
+    const pointerUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/prompts/data.current.json?ts=${ts}`;
+    const pRes = await fetch(pointerUrl, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
+    });
+    if (pRes.ok) {
+      const meta = await pRes.json().catch(() => ({} as any));
+      const currentName: string | undefined = meta?.current;
+      if (currentName && typeof currentName === 'string' && currentName.includes('data-')) {
+        const dataUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/${currentName}?ts=${ts}`;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const dRes = await fetch(dataUrl, {
+              cache: 'no-store',
+              headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
+            });
+            if (dRes.ok) {
+              const data = await dRes.json();
+              console.log('✅ Fetched prompts via pointer ->', currentName, 'items:', Array.isArray(data) ? data.length : 0);
+              return Array.isArray(data) ? data : [];
+            }
+            if (dRes.status === 404 && attempt < 2) {
+              await new Promise(r => setTimeout(r, 300 + attempt * 200));
+              continue;
+            }
+          } catch (e) {
+            if (attempt === 2) throw e;
+            await new Promise(r => setTimeout(r, 300 + attempt * 200));
+          }
+        }
+      }
+    }
+  } catch (e) {
+    // pointer missing or broken → try fallbacks below
+  }
+
+  // Fallback 1: old version pointer (data.ver.txt) + /vN/ path (for transitional deploys)
+  try {
+    const verUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/prompts/data.ver.txt?ts=${ts}`;
+    const vRes = await fetch(verUrl, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' } });
+    if (vRes.ok) {
+      const vText = (await vRes.text()).trim();
+      if (/^\d+$/.test(vText)) {
+        const verDataUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/v${vText}/prompts/data.json?ts=${ts}`;
+        const dv = await fetch(verDataUrl, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' } });
+        if (dv.ok) {
+          const data = await dv.json();
+          console.log('✅ Fetched (legacy ver pointer v' + vText + ') items:', Array.isArray(data) ? data.length : 0);
+          return Array.isArray(data) ? data : [];
+        }
+      }
+    }
+  } catch {}
+
+  // Fallback 2: the original fixed-name path (for any data.json that was created before this pointer scheme, or direct seeds)
+  const legacyUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/prompts/data.json?ts=${ts}`;
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const res = await fetch(url, {
+      const res = await fetch(legacyUrl, {
         cache: 'no-store',
-        headers: { 'Cache-Control': 'no-cache' },
+        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
       });
       if (!res.ok) {
-        if (attempt === 1) return null;
-        await new Promise(r => setTimeout(r, 500)); // small delay before retry
+        if (res.status === 404) {
+          return 'NO_DATA_FILE';
+        }
+        if (attempt === 2) return null;
+        await new Promise(r => setTimeout(r, 300 + attempt * 200));
         continue;
       }
       const data = await res.json();
-      console.log('✅ Fetched prompts data from Cloudinary, items:', Array.isArray(data) ? data.length : 0);
-      return Array.isArray(data) ? data : null;
+      console.log('✅ Fetched prompts data (legacy fixed name) items:', Array.isArray(data) ? data.length : 0);
+      return Array.isArray(data) ? data : [];
     } catch (error) {
-      console.error('❌ Failed to fetch prompts data from Cloudinary (attempt ' + (attempt+1) + '):', error);
-      if (attempt === 1) return null;
-      await new Promise(r => setTimeout(r, 500));
+      if (attempt === 2) return null;
+      await new Promise(r => setTimeout(r, 300 + attempt * 200));
     }
   }
   return null;
