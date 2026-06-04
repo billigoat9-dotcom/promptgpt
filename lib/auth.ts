@@ -81,14 +81,18 @@ function verifyPassword(password: string, stored: AdminRecord) {
 export async function validateAdminCredentials(username: string, password: string) {
   const configured = getConfiguredAdminCredentials();
   if (configured) {
-    return {
-      isValid: username === configured.username && password === configured.password,
-      username: configured.username,
-      twoFactorEnabled: false,
-    };
+    const isConfiguredValid = username === configured.username && password === configured.password;
+
+    if (isConfiguredValid) {
+      return {
+        isValid: true,
+        username: configured.username,
+        twoFactorEnabled: false,
+      };
+    }
   }
 
-  const creds = await getAdminRecord();
+  const creds = await getAdminRecord(false);
 
   return {
     isValid: username === creds.username && verifyPassword(password, creds),
@@ -110,9 +114,9 @@ export async function issueAdminSession(username: string) {
   });
 }
 
-async function getAdminRecord(): Promise<AdminRecord> {
+async function getAdminRecord(preferConfiguredCredentials = true): Promise<AdminRecord> {
   const configured = getConfiguredAdminCredentials();
-  if (configured) {
+  if (preferConfiguredCredentials && configured) {
     return buildEnvBackedAdminRecord(configured.username, configured.password);
   }
 

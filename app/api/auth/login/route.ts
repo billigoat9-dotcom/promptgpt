@@ -10,7 +10,7 @@ import { writeAuditEvent } from '@/lib/audit';
 export const runtime = 'nodejs'; // fs + node:crypto for admin auth
 
 const ATTEMPT_WINDOW_MS = 10 * 60 * 1000;
-const RATE_LIMIT_LIMIT = 5;
+const RATE_LIMIT_LIMIT = 20;
 const RATE_LIMIT_WINDOW = ATTEMPT_WINDOW_MS;
 
 export async function POST(request: NextRequest) {
