@@ -337,7 +337,7 @@ body {
 
 .upload-zone.dragover {
   border-color: var(--accent);
-  background: rgba(124, 58, 237, 0.08);
+  background: var(--accent-light);
 }
 
 /* Sidebar */

@@ -16,12 +16,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PromptGpt • AI Prompt Gallery",
-  description: "Discover, save, and generate beautiful AI prompts. A curated gallery of the world's best prompts for FluxArt, VideoGen, GPT Image, and Midjourney.",
+  title: "PromptGPT - Trending AI Image Prompts | Free Copy & Generate",
+  description: "Discover the best trending AI image prompts for Grok, Midjourney, Flux & more. Copy ready-to-use prompts and create stunning images instantly with PromptGPT.",
   icons: {
-    icon: "/favicon.ico",
+    icon: "/favicon.ico", // agar logo hai toh baad mein change kar sakte ho
   },
 };
+
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

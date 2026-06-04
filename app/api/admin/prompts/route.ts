@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth';
-import { addPrompt } from '@/lib/prompts';
+import { addPrompt, isVercelProd } from '@/lib/prompts';
 import { uploadToCloudinary } from '@/lib/cloudinary';
 import { checkRateLimit, getClientRateLimitKey } from '@/lib/rate-limit';
 import { writeAuditEvent } from '@/lib/audit';
@@ -126,7 +126,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ 
       success: true, 
-      prompt: newPrompt 
+      prompt: newPrompt,
+      warning: isVercelProd 
+        ? 'Prompt added for this request only. On Vercel (read-only filesystem) changes do not persist after the serverless function ends. For permanent changes run the site locally or add a database.'
+        : undefined
     });
 
   } catch (error: any) {

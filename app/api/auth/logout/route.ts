@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getSession, logout } from '@/lib/auth';
 import { writeAuditEvent } from '@/lib/audit';
 
+export const runtime = 'nodejs';
+
 export async function POST(request: Request) {
   const session = await getSession();
   await logout();

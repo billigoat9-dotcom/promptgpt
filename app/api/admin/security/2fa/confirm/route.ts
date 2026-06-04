@@ -7,6 +7,8 @@ import {
 import { writeAuditEvent } from '@/lib/audit';
 import { checkRateLimit, getClientRateLimitKey } from '@/lib/rate-limit';
 
+export const runtime = 'nodejs';
+
 export async function POST(request: NextRequest) {
   try {
     const session = await requireAdmin();

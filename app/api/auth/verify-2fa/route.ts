@@ -8,6 +8,8 @@ import { verifyTwoFactorChallengeToken } from '@/lib/auth-core';
 import { checkRateLimit, getClientRateLimitKey } from '@/lib/rate-limit';
 import { writeAuditEvent } from '@/lib/audit';
 
+export const runtime = 'nodejs'; // fs + node:crypto
+
 const MAX_ATTEMPTS = 5;
 const WINDOW_MS = 10 * 60 * 1000;
 
@@ -27,7 +29,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { tempToken, code } = await request.json();
+    let parsed: any;
+    try {
+      parsed = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: 'Invalid request body. Expected JSON.' },
+        { status: 400 }
+      );
+    }
+    const { tempToken, code } = parsed || {};
 
     if (!tempToken || !code) {
       return NextResponse.json(

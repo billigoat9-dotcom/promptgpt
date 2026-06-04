@@ -84,7 +84,7 @@ export default function AdminLogin() {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 className="w-full bg-[#050507] border border-white/15 rounded-2xl px-4 py-3 text-white focus:border-violet-500 outline-none"
-                placeholder="admin"
+                placeholder="Gaurav@Harsh"
                 required
               />
             </div>

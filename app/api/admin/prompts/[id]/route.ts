@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/auth';
-import { getAllPrompts, savePrompts } from '@/lib/prompts';
+import { getAllPrompts, savePrompts, isVercelProd } from '@/lib/prompts';
 import { checkRateLimit, getClientRateLimitKey } from '@/lib/rate-limit';
 import { writeAuditEvent } from '@/lib/audit';
 
@@ -82,7 +82,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       },
     });
 
-    return NextResponse.json({ success: true, prompt: updatedPrompt });
+    return NextResponse.json({ 
+      success: true, 
+      prompt: updatedPrompt,
+      warning: isVercelProd 
+        ? 'Change applied for this request only. On Vercel deployments prompt data is read-only (no persistence).'
+        : undefined
+    });
   } catch (error: any) {
     if (error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -133,7 +139,12 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       userAgent: request.headers.get('user-agent') || undefined,
       details: { promptId: id },
     });
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ 
+      success: true,
+      warning: isVercelProd 
+        ? 'Delete applied for this request only. On Vercel deployments prompt data is read-only (no persistence).'
+        : undefined
+    });
   } catch (error: any) {
     if (error.message === 'Unauthorized') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

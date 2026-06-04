@@ -1,6 +1,3 @@
-import { appendFile, mkdir, readFile } from 'fs/promises';
-import path from 'path';
-
 export type AuditSeverity = 'info' | 'warning' | 'critical';
 
 export type AuditEvent = {
@@ -14,16 +11,34 @@ export type AuditEvent = {
   details?: Record<string, unknown>;
 };
 
-const AUDIT_FILE = path.join(process.cwd(), 'lib', 'data', 'audit.log');
-async function ensureAuditDir() {
-  await mkdir(path.dirname(AUDIT_FILE), { recursive: true });
+type StoredAuditEvent = Omit<AuditEvent, 'resource' | 'ip' | 'userAgent'> & {
+  id: string;
+  timestamp: string;
+  resource: string | null;
+  ip: string | null;
+  userAgent: string | null;
+  details: Record<string, unknown>;
+};
+
+const AUDIT_BUFFER_LIMIT = 500;
+const globalAuditState = globalThis as typeof globalThis & {
+  __promptgptAuditBuffer?: StoredAuditEvent[];
+};
+
+function getAuditBuffer() {
+  if (!globalAuditState.__promptgptAuditBuffer) {
+    globalAuditState.__promptgptAuditBuffer = [];
+  }
+
+  return globalAuditState.__promptgptAuditBuffer;
 }
 
-export async function writeAuditEvent(event: AuditEvent) {
-  await ensureAuditDir();
-
-  const entry = {
-    id: globalThis.crypto.randomUUID(),
+function createAuditEntry(event: AuditEvent): StoredAuditEvent {
+  return {
+    id:
+      globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : `audit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
     timestamp: new Date().toISOString(),
     severity: event.severity || 'info',
     status: event.status || 'success',
@@ -34,25 +49,30 @@ export async function writeAuditEvent(event: AuditEvent) {
     userAgent: event.userAgent || null,
     details: event.details || {},
   };
+}
 
-  await appendFile(AUDIT_FILE, `${JSON.stringify(entry)}\n`, 'utf-8');
+export async function writeAuditEvent(event: AuditEvent) {
+  try {
+    const entry = createAuditEntry(event);
+    const buffer = getAuditBuffer();
+
+    buffer.push(entry);
+    if (buffer.length > AUDIT_BUFFER_LIMIT) {
+      buffer.splice(0, buffer.length - AUDIT_BUFFER_LIMIT);
+    }
+
+    console.log('[AUDIT]', JSON.stringify(entry));
+  } catch (err: any) {
+    // Never throw - audit is best-effort logging only.
+    console.warn('[AUDIT] write skipped:', err?.message || err);
+  }
 }
 
 export async function readAuditEvents(limit = 200) {
   try {
-    const data = await readFile(AUDIT_FILE, 'utf-8');
-    const lines = data.split('\n').filter(Boolean);
-    const slice = lines.slice(-Math.max(1, Math.min(limit, 500)));
-    return slice
-      .map((line) => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean)
-      .reverse();
+    const buffer = getAuditBuffer();
+    const safeLimit = Math.max(1, Math.min(limit, AUDIT_BUFFER_LIMIT));
+    return buffer.slice(-safeLimit).reverse();
   } catch {
     return [];
   }

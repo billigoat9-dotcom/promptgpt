@@ -37,6 +37,7 @@ export default function AdminDashboard() {
   });
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [adding, setAdding] = useState(false);
 
   // Edit state
@@ -122,20 +123,26 @@ export default function AdminDashboard() {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
+  const setImageFileAndPreview = (file: File | null) => {
+    if (!file) {
+      setImageFile(null);
+      setImagePreview(null);
+      return;
+    }
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setImagePreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+  };
+
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setImageFile(file);
-      const reader = new FileReader();
-      reader.onload = (ev) => setImagePreview(ev.target?.result as string);
-      reader.readAsDataURL(file);
-    }
+    if (file) setImageFileAndPreview(file);
   };
 
   const resetAddForm = () => {
     setFormData({ fullPrompt: '', model: 'FluxArt', tags: '', creator: 'Billi' });
-    setImageFile(null);
-    setImagePreview(null);
+    setImageFileAndPreview(null);
   };
 
   const handleAddPrompt = async (e: React.FormEvent) => {
@@ -175,7 +182,10 @@ export default function AdminDashboard() {
       console.log('Add prompt response status:', res.status, 'data:', data);
 
       if (res.ok && data.success) {
-        alert('✅ Prompt added successfully! Image uploaded to Cloudinary.');
+        const msg = data.warning 
+          ? `✅ Prompt added (this request only). ${data.warning}`
+          : '✅ Prompt added successfully! Image uploaded to Cloudinary.';
+        alert(msg);
         resetAddForm();
         await fetchPrompts();
         setActiveTab('manage');
@@ -228,7 +238,8 @@ export default function AdminDashboard() {
       if (res.ok) {
         await fetchPrompts();
         cancelEdit();
-        alert('Prompt updated successfully');
+        const data = await res.json().catch(() => ({}));
+        alert(data.warning ? `Prompt updated (this request only). ${data.warning}` : 'Prompt updated successfully');
       } else {
         const err = await res.json();
         alert(err.error || 'Failed to update');
@@ -271,7 +282,9 @@ export default function AdminDashboard() {
       const data = await res.json();
 
       if (res.ok) {
-        alert('Credentials updated successfully! You will be logged out.');
+        const data = await res.json().catch(() => ({}));
+        const base = 'Credentials updated successfully! You will be logged out.';
+        alert(data.warning ? `${base} ${data.warning}` : base);
         await fetch('/api/auth/logout', { method: 'POST' });
         router.push('/admin/login');
       } else {
@@ -421,15 +434,39 @@ export default function AdminDashboard() {
               {/* Image */}
               <div>
                 <label className="block text-sm font-medium text-white/70 mb-2">Image (optional)</label>
-                <div className="border-2 border-dashed border-white/20 rounded-2xl p-6 text-center">
+                <div
+                  className={`upload-zone rounded-2xl p-6 text-center transition-all cursor-pointer ${isDragOver ? 'dragover' : 'hover:border-white/40'}`}
+                  onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                  onDragLeave={() => setIsDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragOver(false);
+                    const file = e.dataTransfer.files?.[0];
+                    if (file && file.type.startsWith('image/')) {
+                      setImageFileAndPreview(file);
+                    }
+                  }}
+                  onClick={() => document.getElementById('img')?.click()}
+                >
                   <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" id="img" />
-                  <label htmlFor="img" className="cursor-pointer">
-                    {imagePreview ? (
+                  {imagePreview ? (
+                    <div className="relative inline-block">
                       <img src={imagePreview} className="max-h-56 mx-auto rounded-xl" alt="preview" />
-                    ) : (
-                      <div>Click or drag to upload image</div>
-                    )}
-                  </label>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setImageFileAndPreview(null); }}
+                        className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="text-white/60">
+                      <div className="mb-2">📁</div>
+                      <div>Click to upload or drag & drop image here</div>
+                      <div className="text-xs mt-1 text-white/40">PNG, JPG, WEBP up to 5MB</div>
+                    </div>
+                  )}
                 </div>
               </div>
 

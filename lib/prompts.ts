@@ -13,6 +13,8 @@ async function ensureDataDir() {
   } catch {}
 }
 
+export const isVercelProd = process.env.NODE_ENV === 'production' && !!process.env.VERCEL;
+
 // Load prompts (from file or fallback to mock)
 export async function getAllPrompts(): Promise<Prompt[]> {
   await ensureDataDir();
@@ -26,6 +28,10 @@ export async function getAllPrompts(): Promise<Prompt[]> {
   } catch (error) {
     // File doesn't exist or invalid - seed with mock data
     console.log('Seeding prompts from mock data...');
+    // In Vercel prod we cannot reliably write the seed file, so just return mocks in memory for this request.
+    if (isVercelProd) {
+      return [...MOCK_PROMPTS];
+    }
     await savePrompts(MOCK_PROMPTS);
     return MOCK_PROMPTS;
   }
@@ -35,6 +41,12 @@ export async function getAllPrompts(): Promise<Prompt[]> {
 
 // Save all prompts
 export async function savePrompts(prompts: Prompt[]): Promise<void> {
+  if (isVercelProd) {
+    // On Vercel the FS is read-only / changes don't persist across invocations.
+    // We still allow the in-memory operation for the current request but warn.
+    console.warn('[Prompts] savePrompts skipped on Vercel (read-only filesystem). Changes will not persist.');
+    return;
+  }
   await ensureDataDir();
   await fs.writeFile(DATA_FILE, JSON.stringify(prompts, null, 2), 'utf-8');
 }

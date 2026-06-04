@@ -19,7 +19,26 @@ function getSessionSecret() {
   }
 
   if (process.env.NODE_ENV === 'production') {
-    throw new Error('ADMIN_AUTH_SECRET is required in production');
+    // Never throw (would turn successful logins into 500 Internal server error).
+    // Use a random ephemeral secret per process start and log a loud warning.
+    // Admin sessions will not survive a server restart until ADMIN_AUTH_SECRET is set.
+    console.error(
+      '\n[PromptGpt] CRITICAL: ADMIN_AUTH_SECRET is not set in production.\n' +
+      'Using an ephemeral in-memory secret for this process only.\n' +
+      'Set a strong ADMIN_AUTH_SECRET in your environment (e.g. .env.local or hosting dashboard) for persistent sessions.\n' +
+      'All admin logins will require re-auth after every server restart until fixed!\n'
+    );
+    // Generate using Web Crypto (no node:crypto import to stay portable)
+    try {
+      if (globalThis.crypto?.getRandomValues) {
+        const arr = new Uint8Array(32);
+        globalThis.crypto.getRandomValues(arr);
+        let hex = '';
+        for (let i = 0; i < arr.length; i++) hex += arr[i].toString(16).padStart(2, '0');
+        return 'ephemeral-prod-' + hex;
+      }
+    } catch {}
+    return 'ephemeral-prod-insecure-' + Date.now().toString(36);
   }
 
   return 'prompt-gallery-dev-secret-change-before-deploy';

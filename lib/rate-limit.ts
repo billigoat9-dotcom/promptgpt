@@ -34,8 +34,15 @@ async function getRedisClient() {
     redisReady = redisClient.connect().then(() => undefined);
   }
 
-  await redisReady;
-  return redisClient;
+  try {
+    await redisReady;
+    return redisClient;
+  } catch (error) {
+    console.warn('[RateLimit] Redis unavailable, using in-memory fallback:', error);
+    redisReady = null;
+    redisClient = null;
+    return null;
+  }
 }
 
 export async function checkRateLimit({ key, limit, windowMs }: RateLimitOptions): Promise<RateLimitResult> {

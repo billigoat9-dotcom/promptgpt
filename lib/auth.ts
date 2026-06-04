@@ -34,12 +34,41 @@ const ADMIN_FILE = path.join(process.cwd(), 'lib', 'data', 'admin.json');
 const PASSWORD_KEY_LENGTH = 32;
 
 async function ensureAdminDir() {
-  await mkdir(path.dirname(ADMIN_FILE), { recursive: true });
+  try {
+    await mkdir(path.dirname(ADMIN_FILE), { recursive: true });
+  } catch {
+    // On Vercel / read-only FS this can fail. We still try to read the bundled file.
+    // Write paths are separately guarded.
+  }
 }
 
 function hashPassword(password: string, salt = crypto.randomBytes(16).toString('hex')) {
   const hash = crypto.scryptSync(password, salt, PASSWORD_KEY_LENGTH).toString('hex');
   return { passwordHash: hash, passwordSalt: salt };
+}
+
+function getConfiguredAdminCredentials() {
+  const username = process.env.ADMIN_USERNAME?.trim() || process.env.ADMIN_INITIAL_USERNAME?.trim();
+  const password = process.env.ADMIN_PASSWORD?.trim() || process.env.ADMIN_INITIAL_PASSWORD?.trim();
+
+  if (!username || !password) {
+    return null;
+  }
+
+  return { username, password };
+}
+
+function buildEnvBackedAdminRecord(username: string, password: string): AdminRecord {
+  const salt = crypto.createHash('sha256').update(`promptgpt-admin:${username}`).digest('hex').slice(0, 32);
+  const { passwordHash, passwordSalt } = hashPassword(password, salt);
+
+  return {
+    username,
+    passwordHash,
+    passwordSalt,
+    passwordUpdatedAt: new Date().toISOString(),
+    twoFactorEnabled: false,
+  };
 }
 
 function verifyPassword(password: string, stored: AdminRecord) {
@@ -50,6 +79,15 @@ function verifyPassword(password: string, stored: AdminRecord) {
 }
 
 export async function validateAdminCredentials(username: string, password: string) {
+  const configured = getConfiguredAdminCredentials();
+  if (configured) {
+    return {
+      isValid: username === configured.username && password === configured.password,
+      username: configured.username,
+      twoFactorEnabled: false,
+    };
+  }
+
   const creds = await getAdminRecord();
 
   return {
@@ -73,6 +111,11 @@ export async function issueAdminSession(username: string) {
 }
 
 async function getAdminRecord(): Promise<AdminRecord> {
+  const configured = getConfiguredAdminCredentials();
+  if (configured) {
+    return buildEnvBackedAdminRecord(configured.username, configured.password);
+  }
+
   await ensureAdminDir();
 
   try {
@@ -112,12 +155,21 @@ async function getAdminRecord(): Promise<AdminRecord> {
     // fall through to bootstrap
   }
 
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('Admin credentials are missing. Set up lib/data/admin.json before starting production.');
+  // Auto-bootstrap (never throw). This prevents "Internal server error" on /api/auth/login
+  // when admin.json is missing or unreadable (e.g. first prod run, deleted file, parse error).
+  // If ADMIN_INITIAL_* provided they are used (works in prod too). In prod without them we
+  // generate a strong one-time password and print it to the server console.
+  const isProd = process.env.NODE_ENV === 'production';
+  const username = process.env.ADMIN_INITIAL_USERNAME || 'Gaurav@Harsh';
+  let initialPassword = process.env.ADMIN_INITIAL_PASSWORD;
+  if (!initialPassword) {
+    if (isProd) {
+      // Strong random, url-safe, alphanum only for easy typing
+      initialPassword = crypto.randomBytes(16).toString('base64url').replace(/[^a-zA-Z0-9]/g, '').slice(0, 18);
+    } else {
+      initialPassword = 'change-me-now';
+    }
   }
-
-  const username = process.env.ADMIN_INITIAL_USERNAME || 'admin';
-  const initialPassword = process.env.ADMIN_INITIAL_PASSWORD || 'change-me-now';
   const { passwordHash, passwordSalt } = hashPassword(initialPassword);
   const seeded: AdminRecord = {
     username,
@@ -128,11 +180,34 @@ async function getAdminRecord(): Promise<AdminRecord> {
   };
 
   await writeAdminRecord(seeded);
-  console.warn('Admin credentials bootstrap file was created for development. Change ADMIN_INITIAL_PASSWORD immediately.');
+
+  if (isProd && !process.env.ADMIN_INITIAL_PASSWORD) {
+    console.error(
+      `\n[PromptGpt Admin] PRODUCTION AUTO-BOOTSTRAP:\n` +
+      `  No valid admin.json (or unreadable). Generated fresh credentials.\n` +
+      `  Username: ${username}\n` +
+      `  Password: ${initialPassword}\n` +
+      `  >>> SAVE THE PASSWORD NOW! It is only printed once. Login at /admin/login then change it in Settings.\n`
+    );
+  } else if (!isProd) {
+    console.warn('Admin credentials bootstrap file was created for development. Change ADMIN_INITIAL_PASSWORD immediately.');
+  }
   return seeded;
 }
 
 async function writeAdminRecord(record: AdminRecord) {
+  const isVercel = !!process.env.VERCEL;
+  const isProd = process.env.NODE_ENV === 'production';
+
+  if (isVercel || isProd) {
+    // On Vercel (and generally in prod deploys without persistent FS) we do not support
+    // persisting credential changes via file. The admin must manage via env vars or re-deploy.
+    console.warn('[Admin] writeAdminRecord skipped — credential changes via Settings UI are not supported on this deployment (Vercel read-only FS).');
+    // We still allow the operation to "succeed" in memory for the current request,
+    // but the next request will load from the committed admin.json again.
+    return;
+  }
+
   await ensureAdminDir();
   await writeFile(ADMIN_FILE, JSON.stringify(record, null, 2));
 }

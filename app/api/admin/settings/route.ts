@@ -3,6 +3,10 @@ import { requireAdmin, updateAdminCredentials, getAdminRecordSnapshot } from '@/
 import { checkRateLimit, getClientRateLimitKey } from '@/lib/rate-limit';
 import { writeAuditEvent } from '@/lib/audit';
 
+export const runtime = 'nodejs'; // node:crypto + fs for admin record
+
+const isVercel = !!process.env.VERCEL;
+
 export async function GET() {
   try {
     await requireAdmin();
@@ -62,7 +66,8 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ 
       success: true, 
-      message: 'Credentials updated. Please login again with new credentials.' 
+      message: 'Credentials updated. Please login again with new credentials.' + (isVercel ? ' (Note: on Vercel this change only affects the current function instance and will be lost on next request.)' : ''),
+      warning: isVercel ? 'Credential changes do not persist on Vercel deployments. Use ADMIN_INITIAL_* environment variables or commit an updated admin.json and redeploy.' : undefined
     });
   } catch (error: any) {
     if (error.message === 'Unauthorized') {

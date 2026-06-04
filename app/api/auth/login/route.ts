@@ -7,6 +7,8 @@ import { createTwoFactorChallengeToken } from '@/lib/auth-core';
 import { checkRateLimit, getClientRateLimitKey } from '@/lib/rate-limit';
 import { writeAuditEvent } from '@/lib/audit';
 
+export const runtime = 'nodejs'; // fs + node:crypto for admin auth
+
 const ATTEMPT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_LIMIT = 5;
 const RATE_LIMIT_WINDOW = ATTEMPT_WINDOW_MS;
@@ -27,7 +29,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { username, password } = await request.json();
+    let parsed: any;
+    try {
+      parsed = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: 'Invalid request body. Expected JSON.' },
+        { status: 400 }
+      );
+    }
+    const { username, password } = parsed || {};
 
     if (!username || !password) {
       return NextResponse.json(

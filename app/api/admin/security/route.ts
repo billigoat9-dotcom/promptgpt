@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { requireAdmin, getAdminSecurityState } from '@/lib/auth';
 
+export const runtime = 'nodejs';
+
 export async function GET() {
   try {
     await requireAdmin();
