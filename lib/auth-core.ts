@@ -11,6 +11,8 @@ type TokenPayload = {
   nonce: string;
 };
 
+let cachedProdSecret: string | null = null;
+
 function getSessionSecret() {
   const secret = process.env.ADMIN_AUTH_SECRET;
 
@@ -19,14 +21,17 @@ function getSessionSecret() {
   }
 
   if (process.env.NODE_ENV === 'production') {
+    if (cachedProdSecret) {
+      return cachedProdSecret;
+    }
     // Never throw (would turn successful logins into 500 Internal server error).
-    // Use a random ephemeral secret per process start and log a loud warning.
+    // Use a random ephemeral secret per process start (cached for this instance) and log a loud warning.
     // Admin sessions will not survive a server restart until ADMIN_AUTH_SECRET is set.
     console.error(
       '\n[PromptGpt] CRITICAL: ADMIN_AUTH_SECRET is not set in production.\n' +
-      'Using an ephemeral in-memory secret for this process only.\n' +
-      'Set a strong ADMIN_AUTH_SECRET in your environment (e.g. .env.local or hosting dashboard) for persistent sessions.\n' +
-      'All admin logins will require re-auth after every server restart until fixed!\n'
+      'Using an ephemeral in-memory secret for this process only (cached per cold start).\n' +
+      'Set a strong ADMIN_AUTH_SECRET in your environment (Vercel dashboard etc.) for persistent sessions across instances.\n' +
+      'Without it, sessions may break between requests on serverless platforms like Vercel.\n'
     );
     // Generate using Web Crypto (no node:crypto import to stay portable)
     try {
@@ -35,10 +40,12 @@ function getSessionSecret() {
         globalThis.crypto.getRandomValues(arr);
         let hex = '';
         for (let i = 0; i < arr.length; i++) hex += arr[i].toString(16).padStart(2, '0');
-        return 'ephemeral-prod-' + hex;
+        cachedProdSecret = 'ephemeral-prod-' + hex;
+        return cachedProdSecret;
       }
     } catch {}
-    return 'ephemeral-prod-insecure-' + Date.now().toString(36);
+    cachedProdSecret = 'ephemeral-prod-insecure-' + Date.now().toString(36);
+    return cachedProdSecret;
   }
 
   return 'prompt-gallery-dev-secret-change-before-deploy';

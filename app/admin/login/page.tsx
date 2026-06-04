@@ -29,8 +29,9 @@ export default function AdminLogin() {
         const data = await res.json();
 
         if (res.ok && data.success) {
-          router.push('/admin');
-          router.refresh();
+          // Force full page load to ensure httpOnly session cookie is properly attached
+          // and middleware can validate it reliably (SPA push can have timing/cookie issues on some deploys)
+          window.location.href = '/admin';
         } else {
           setError(data.error || 'Verification failed');
         }
@@ -48,8 +49,9 @@ export default function AdminLogin() {
           setTempToken(data.tempToken);
           setError('');
         } else if (res.ok && data.success) {
-          router.push('/admin');
-          router.refresh();
+          // Force full page load to ensure httpOnly session cookie is properly attached
+          // and middleware can validate it reliably (SPA push can have timing/cookie issues on some deploys)
+          window.location.href = '/admin';
         } else {
           setError(data.error || 'Login failed');
         }
