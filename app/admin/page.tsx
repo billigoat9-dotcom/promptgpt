@@ -187,8 +187,12 @@ export default function AdminDashboard() {
         } else {
           alert('✅ Prompt added successfully! Image uploaded to Cloudinary.');
         }
+        if (data.prompt) {
+          setPrompts(prev => [data.prompt, ...prev.filter(p => p.id !== data.prompt.id)]);
+          setTotalPrompts(prev => prev + 1);
+        }
+        setTimeout(() => fetchPrompts(), 1500);
         resetAddForm();
-        await fetchPrompts();
         setActiveTab('manage');
       } else {
         const errorMsg = data.error || rawText || `HTTP ${res.status} - Failed to add prompt`;
@@ -257,8 +261,14 @@ export default function AdminDashboard() {
       const res = await fetch(`/api/admin/prompts/${id}`, { method: 'DELETE' });
       if (res.ok) {
         const data = await res.json().catch(() => ({}));
-        await fetchPrompts();
-        alert(data.warning ? data.warning : 'Prompt deleted');
+        // optimistic remove
+        setPrompts(prev => prev.filter(p => p.id !== id));
+        setTotalPrompts(prev => Math.max(0, prev - 1));
+        if (data.warning) {
+          alert(data.warning);
+        } else {
+          setTimeout(() => fetchPrompts(), 1500);
+        }
       } else {
         alert('Failed to delete prompt');
       }

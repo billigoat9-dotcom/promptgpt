@@ -62,14 +62,8 @@ export async function getAllPrompts(): Promise<Prompt[]> {
     const data = await fs.readFile(DATA_FILE, 'utf-8');
     const parsed = JSON.parse(data);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      // If Cloudinary available, upload the current data to it for future use
-      if (hasCloudinaryCreds) {
-        try {
-          await uploadPromptsData(parsed);
-        } catch (e) {
-          console.error('Failed to seed current file data to Cloudinary:', e);
-        }
-      }
+      // Do NOT upload here - that would overwrite Cloudinary data with old bundled file.
+      // Seeding only happens on explicit save or in the catch (initial no data).
       if (redisClient) {
         try {
           await redisClient.set('prompts', JSON.stringify(parsed));

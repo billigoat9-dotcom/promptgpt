@@ -93,11 +93,22 @@ export async function uploadPromptsData(prompts: Prompt[]): Promise<void> {
   const base64 = Buffer.from(jsonString).toString('base64');
   const dataUri = `data:application/json;base64,${base64}`;
 
-  await cloudinary.uploader.upload(dataUri, {
+  const result = await cloudinary.uploader.upload(dataUri, {
     resource_type: 'raw',
-    public_id: 'prompts/data',
+    public_id: 'prompts/data.json',
     overwrite: true,
   });
+  console.log('✅ Prompts data uploaded to Cloudinary:', result.secure_url);
+  // Purge CDN cache so subsequent fetches get the fresh content immediately
+  try {
+    await cloudinary.api.delete_resources(['prompts/data.json'], {
+      resource_type: 'raw',
+      invalidate: true,
+    });
+    console.log('✅ Cloudinary cache purged for prompts data');
+  } catch (e) {
+    console.warn('Cloudinary cache invalidate non-critical error:', e);
+  }
 }
 
 export async function getPromptsData(): Promise<Prompt[] | null> {
@@ -106,7 +117,7 @@ export async function getPromptsData(): Promise<Prompt[] | null> {
     return null;
   }
 
-  const url = `https://res.cloudinary.com/${cloudName}/raw/upload/prompts/data?_=${Date.now()}`;
+  const url = `https://res.cloudinary.com/${cloudName}/raw/upload/prompts/data.json?_=${Date.now()}`;
   try {
     const res = await fetch(url, {
       cache: 'no-store',
@@ -116,6 +127,7 @@ export async function getPromptsData(): Promise<Prompt[] | null> {
       return null;
     }
     const data = await res.json();
+    console.log('✅ Fetched prompts data from Cloudinary, items:', Array.isArray(data) ? data.length : 0);
     return Array.isArray(data) ? data : null;
   } catch (error) {
     console.error('❌ Failed to fetch prompts data from Cloudinary:', error);
