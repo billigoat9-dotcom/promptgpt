@@ -69,9 +69,15 @@ export default function AdminDashboard() {
     try {
       const res = await fetch('/api/admin/prompts');
       if (res.ok) {
-        const data = await res.json();
-        setPrompts(data);
-        setTotalPrompts(data.length);
+        const serverData: Prompt[] = await res.json();
+        setPrompts(prev => {
+          const serverIds = new Set(serverData.map(p => p.id));
+          const newOptimistic = prev.filter(p => !serverIds.has(p.id));
+          // keep optimistic new prompts (they may not be in server yet due to propagation)
+          return [...newOptimistic, ...serverData];
+        });
+        // total will be corrected on re-fetch; use server length for now
+        setTotalPrompts(serverData.length);
       }
     } catch (e) {
       console.error(e);
@@ -241,10 +247,12 @@ export default function AdminDashboard() {
       });
 
       if (res.ok) {
-        await fetchPrompts();
+        // optimistic update
+        setPrompts(prev => prev.map(p => p.id === id ? { ...p, ...editData, fullPrompt: editData.fullPrompt || p.fullPrompt, prompt: editData.prompt || p.prompt, likes: Number(editData.likes) || p.likes, views: Number(editData.views) || p.views, model: editData.model || p.model } : p));
         cancelEdit();
         const data = await res.json().catch(() => ({}));
         alert(data.warning ? data.warning : 'Prompt updated successfully');
+        setTimeout(() => fetchPrompts(), 1500);
       } else {
         const err = await res.json();
         alert(err.error || 'Failed to update');

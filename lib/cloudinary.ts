@@ -118,19 +118,25 @@ export async function getPromptsData(): Promise<Prompt[] | null> {
   }
 
   const url = `https://res.cloudinary.com/${cloudName}/raw/upload/prompts/data.json?_=${Date.now()}`;
-  try {
-    const res = await fetch(url, {
-      cache: 'no-store',
-      headers: { 'Cache-Control': 'no-cache' },
-    });
-    if (!res.ok) {
-      return null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url, {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' },
+      });
+      if (!res.ok) {
+        if (attempt === 1) return null;
+        await new Promise(r => setTimeout(r, 500)); // small delay before retry
+        continue;
+      }
+      const data = await res.json();
+      console.log('✅ Fetched prompts data from Cloudinary, items:', Array.isArray(data) ? data.length : 0);
+      return Array.isArray(data) ? data : null;
+    } catch (error) {
+      console.error('❌ Failed to fetch prompts data from Cloudinary (attempt ' + (attempt+1) + '):', error);
+      if (attempt === 1) return null;
+      await new Promise(r => setTimeout(r, 500));
     }
-    const data = await res.json();
-    console.log('✅ Fetched prompts data from Cloudinary, items:', Array.isArray(data) ? data.length : 0);
-    return Array.isArray(data) ? data : null;
-  } catch (error) {
-    console.error('❌ Failed to fetch prompts data from Cloudinary:', error);
-    return null;
   }
+  return null;
 }
