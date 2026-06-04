@@ -51,6 +51,7 @@ export async function POST(request: NextRequest) {
     const userAgent = request.headers.get('user-agent') || undefined;
 
     if (!result.isValid) {
+      console.error(`[Admin Login] Validation failed for username="${username}". This means either wrong creds or (more likely) your Vercel deployment is still running OLD code without the latest auth fixes + hard fallback. Push latest code and Redeploy on Vercel NOW! Known working: Gaurav@Harsh / billi123`);
       await writeAuditEvent({
         action: 'admin.login',
         actor: username,

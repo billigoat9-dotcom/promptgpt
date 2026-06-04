@@ -1,7 +1,7 @@
 {
   "username": "Gaurav@Harsh",
-  "passwordHash": "23191cfbc56b73da02f08a7c4ee1a676012a492b503abb9bfd7bb8a1a4634e0c",
-  "passwordSalt": "11111e8b0d225643bb7a384f17485b05",
-  "passwordUpdatedAt": "2026-06-03T12:35:46.429Z",
+  "passwordHash": "67638ef5ea67eef234671f8281e6a06d2699322d326a13278d36ea5fd6dc5a61",
+  "passwordSalt": "be1b4de511a057b3c0a485d0b697d101",
+  "passwordUpdatedAt": "2026-06-04T07:00:19.776Z",
   "twoFactorEnabled": false
 }
