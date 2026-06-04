@@ -197,7 +197,6 @@ export default function AdminDashboard() {
           setPrompts(prev => [data.prompt, ...prev.filter(p => p.id !== data.prompt.id)]);
           setTotalPrompts(prev => prev + 1);
         }
-        setTimeout(() => fetchPrompts(), 1500);
         resetAddForm();
         setActiveTab('manage');
       } else {
@@ -252,7 +251,6 @@ export default function AdminDashboard() {
         cancelEdit();
         const data = await res.json().catch(() => ({}));
         alert(data.warning ? data.warning : 'Prompt updated successfully');
-        setTimeout(() => fetchPrompts(), 1500);
       } else {
         const err = await res.json();
         alert(err.error || 'Failed to update');
@@ -274,8 +272,6 @@ export default function AdminDashboard() {
         setTotalPrompts(prev => Math.max(0, prev - 1));
         if (data.warning) {
           alert(data.warning);
-        } else {
-          setTimeout(() => fetchPrompts(), 1500);
         }
       } else {
         alert('Failed to delete prompt');
@@ -535,7 +531,7 @@ export default function AdminDashboard() {
         {/* MANAGE PROMPTS */}
         {activeTab === 'manage' && (
           <div className="space-y-4">
-            <h2 className="text-2xl font-semibold">Manage Prompts ({prompts.length})</h2>
+            <h2 className="text-2xl font-semibold">Manage Prompts ({prompts.length}) <button onClick={fetchPrompts} className="ml-2 text-sm px-2 py-1 bg-white/10 rounded">Refresh</button></h2>
 
             {prompts.length === 0 && <p className="text-white/50">No prompts yet.</p>}
 
