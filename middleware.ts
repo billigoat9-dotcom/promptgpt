@@ -8,12 +8,29 @@ export async function middleware(request: NextRequest) {
   // Protect all /admin routes except login
   if (pathname.startsWith('/admin') && pathname !== '/admin/login') {
     const sessionCookie = request.cookies.get(SESSION_COOKIE_NAME);
+    const hasCookie = !!sessionCookie?.value;
 
-    if (!sessionCookie?.value || !(await verifySessionToken(sessionCookie.value))) {
-      // Redirect to login
+    console.log(`[Middleware] Protecting ${pathname} | cookie present: ${hasCookie}`);
+
+    let valid = false;
+    if (hasCookie) {
+      try {
+        const result = await verifySessionToken(sessionCookie.value);
+        valid = !!result;
+        console.log(`[Middleware] verifySessionToken result for ${pathname}: ${valid ? 'VALID' : 'INVALID'} (user: ${result?.username || 'n/a'})`);
+      } catch (e) {
+        console.error('[Middleware] verifySessionToken threw:', e);
+        valid = false;
+      }
+    }
+
+    if (!valid) {
+      console.log(`[Middleware] Redirecting unauthenticated request for ${pathname} -> /admin/login`);
       const loginUrl = new URL('/admin/login', request.url);
       loginUrl.searchParams.set('from', pathname);
       return NextResponse.redirect(loginUrl);
+    } else {
+      console.log(`[Middleware] Access granted to ${pathname}`);
     }
   }
 

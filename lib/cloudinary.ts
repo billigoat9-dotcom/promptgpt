@@ -139,6 +139,20 @@ export async function uploadPromptsData(prompts: Prompt[]): Promise<void> {
     console.warn('Fixed-name back-compat upload non-critical:', e?.message || e);
   }
 
+  try {
+    const versionedPointer = await getVersionedRawUrl('prompts/data.current.json');
+    if (versionedPointer) {
+      await cloudinary.uploader.explicit(versionedPointer.replace(`https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/raw/upload/`, ''), {
+        resource_type: 'raw',
+        type: 'upload',
+        invalidate: true,
+      });
+      console.log('✅ Invalidated versioned pointer path for prompts/data.current.json');
+    }
+  } catch (e: any) {
+    console.warn('Versioned pointer invalidation non-critical:', e?.message || e);
+  }
+
   // Invalidate the pointer (and the unique blob)
   try {
     await cloudinary.uploader.explicit('prompts/data.current.json', {
@@ -157,6 +171,22 @@ export async function uploadPromptsData(prompts: Prompt[]): Promise<void> {
   }
 }
 
+async function getVersionedRawUrl(publicId: string): Promise<string | null> {
+  try {
+    ensureCloudinaryConfigured();
+    const resource = await cloudinary.api.resource(publicId, {
+      resource_type: 'raw',
+      type: 'upload',
+    });
+    if (resource?.version) {
+      return `https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/raw/upload/v${resource.version}/${publicId}`;
+    }
+  } catch (error: any) {
+    console.warn('Failed to resolve versioned raw URL for', publicId, error?.message || error);
+  }
+  return null;
+}
+
 export async function getPromptsData(): Promise<Prompt[] | 'NO_DATA_FILE' | null> {
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
   if (!cloudName) {
@@ -164,8 +194,10 @@ export async function getPromptsData(): Promise<Prompt[] | 'NO_DATA_FILE' | null
   }
 
   const ts = Date.now();
+  const candidates: Prompt[][] = [];
 
-  // Preferred: read the "current" pointer written by the immutable-blob + pointer scheme.
+  // 1. Try the pointer (data.current.json) -> a unique immutable data-*.json blob.
+  // The unique name has no overwrite lag *once we know the correct name from the pointer*.
   try {
     const pointerUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/prompts/data.current.json?ts=${ts}`;
     const pRes = await fetch(pointerUrl, {
@@ -185,25 +217,28 @@ export async function getPromptsData(): Promise<Prompt[] | 'NO_DATA_FILE' | null
             });
             if (dRes.ok) {
               const data = await dRes.json();
-              console.log('✅ Fetched prompts via pointer ->', currentName, 'items:', Array.isArray(data) ? data.length : 0);
-              return Array.isArray(data) ? data : [];
+              if (Array.isArray(data) && data.length > 0) {
+                candidates.push(data);
+                console.log('✅ Fetched via pointer ->', currentName, 'items:', data.length);
+              }
+              break;
             }
             if (dRes.status === 404 && attempt < 2) {
               await new Promise(r => setTimeout(r, 300 + attempt * 200));
               continue;
             }
-          } catch (e) {
-            if (attempt === 2) throw e;
+          } catch {
+            if (attempt === 2) break;
             await new Promise(r => setTimeout(r, 300 + attempt * 200));
           }
         }
       }
     }
-  } catch (e) {
-    // pointer missing or broken → try fallbacks below
+  } catch {
+    // pointer channel failed, continue to others
   }
 
-  // Fallback 1: old version pointer (data.ver.txt) + /vN/ path (for transitional deploys)
+  // 2. Legacy version pointer (data.ver.txt) + explicit /v{ver}/... path
   try {
     const verUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/prompts/data.ver.txt?ts=${ts}`;
     const vRes = await fetch(verUrl, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' } });
@@ -214,14 +249,18 @@ export async function getPromptsData(): Promise<Prompt[] | 'NO_DATA_FILE' | null
         const dv = await fetch(verDataUrl, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' } });
         if (dv.ok) {
           const data = await dv.json();
-          console.log('✅ Fetched (legacy ver pointer v' + vText + ') items:', Array.isArray(data) ? data.length : 0);
-          return Array.isArray(data) ? data : [];
+          if (Array.isArray(data) && data.length > 0) {
+            candidates.push(data);
+            console.log('✅ Fetched (legacy ver pointer v' + vText + ') items:', data.length);
+          }
         }
       }
     }
   } catch {}
 
-  // Fallback 2: the original fixed-name path (for any data.json that was created before this pointer scheme, or direct seeds)
+  // 3. The classic fixed `prompts/data.json`.
+  // uploadPromptsData *always* does a fresh upload + explicit invalidate to this name on every save
+  // (in addition to the unique blob). This is our most dependable channel.
   const legacyUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/prompts/data.json?ts=${ts}`;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -229,21 +268,63 @@ export async function getPromptsData(): Promise<Prompt[] | 'NO_DATA_FILE' | null
         cache: 'no-store',
         headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
       });
-      if (!res.ok) {
-        if (res.status === 404) {
-          return 'NO_DATA_FILE';
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          candidates.push(data);
+          console.log('✅ Fetched (legacy fixed name) items:', data.length);
         }
-        if (attempt === 2) return null;
-        await new Promise(r => setTimeout(r, 300 + attempt * 200));
-        continue;
+        break;
       }
-      const data = await res.json();
-      console.log('✅ Fetched prompts data (legacy fixed name) items:', Array.isArray(data) ? data.length : 0);
-      return Array.isArray(data) ? data : [];
-    } catch (error) {
-      if (attempt === 2) return null;
-      await new Promise(r => setTimeout(r, 300 + attempt * 200));
+      if (res.status !== 404 && attempt < 2) {
+        await new Promise(r => setTimeout(r, 300 + attempt * 200));
+      } else if (res.status === 404) {
+        break;
+      }
+    } catch {
+      if (attempt < 2) await new Promise(r => setTimeout(r, 300 + attempt * 200));
     }
   }
-  return null;
+
+  // 4. Stronger fallback: if the unversioned fixed path is stale, resolve the
+  // latest versioned Cloudinary asset and fetch that directly.
+  try {
+    const versionedLegacyUrl = await getVersionedRawUrl('prompts/data.json');
+    if (versionedLegacyUrl) {
+      const res = await fetch(`${versionedLegacyUrl}?ts=${ts}`, {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          candidates.push(data);
+          console.log('✅ Fetched (versioned fixed name) items:', data.length);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Versioned fixed name fallback failed:', e);
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const byId = new Map<string, Prompt>();
+  for (const list of candidates) {
+    for (const p of list) {
+      const prev = byId.get(p.id);
+      if (!prev || ((p.createdAt || '') > (prev.createdAt || ''))) {
+        byId.set(p.id, p);
+      }
+    }
+  }
+
+  const merged = Array.from(byId.values()).sort((a, b) =>
+    (b.createdAt || '').localeCompare(a.createdAt || '')
+  );
+
+  console.log(`✅ getPromptsData: merged ${candidates.length} source(s) into ${merged.length} unique prompts (union by id)`);
+  return merged;
 }

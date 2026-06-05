@@ -17,7 +17,9 @@ function getSessionSecret() {
   const secret = process.env.ADMIN_AUTH_SECRET;
 
   if (secret && secret.trim()) {
-    return secret.trim();
+    const trimmed = secret.trim();
+    console.log(`[AuthCore] getSessionSecret: using STABLE ADMIN_AUTH_SECRET from env (len=${trimmed.length})`);
+    return trimmed;
   }
 
   if (process.env.NODE_ENV === 'production') {
@@ -30,8 +32,9 @@ function getSessionSecret() {
     console.error(
       '\n[PromptGpt] CRITICAL: ADMIN_AUTH_SECRET is not set in production.\n' +
       'Using an ephemeral in-memory secret for this process only (cached per cold start).\n' +
+      '>>> THIS IS WHY YOUR LOGIN SUCCEEDS BUT /admin REDIRECTS BACK TO LOGIN (signature mismatch).\n' +
       'Set a strong ADMIN_AUTH_SECRET in your environment (Vercel dashboard etc.) for persistent sessions across instances.\n' +
-      'Without it, sessions may break between requests on serverless platforms like Vercel.\n'
+      'Without it, sessions will randomly break on Vercel serverless.\n'
     );
     // Generate using Web Crypto (no node:crypto import to stay portable)
     try {
@@ -41,10 +44,12 @@ function getSessionSecret() {
         let hex = '';
         for (let i = 0; i < arr.length; i++) hex += arr[i].toString(16).padStart(2, '0');
         cachedProdSecret = 'ephemeral-prod-' + hex;
+        console.warn('[AuthCore] getSessionSecret: using EPHEMERAL secret for this cold start only (will NOT match other cold starts!)');
         return cachedProdSecret;
       }
     } catch {}
     cachedProdSecret = 'ephemeral-prod-insecure-' + Date.now().toString(36);
+    console.warn('[AuthCore] getSessionSecret: using fallback EPHEMERAL secret (per cold start)');
     return cachedProdSecret;
   }
 
@@ -123,27 +128,42 @@ async function createSignedToken(username: string, purpose: TokenPurpose, ttlMs:
   const encodedPayload = bytesToBase64Url(new TextEncoder().encode(JSON.stringify(payload)));
   const signature = await hmacSignature(encodedPayload, secret);
 
+  console.log(`[AuthCore] Created ${purpose} token for username="${username}" using current secret (exp in ${Math.round(ttlMs/1000/60)}min)`);
   return `${encodedPayload}.${signature}`;
 }
 
 async function verifySignedToken(token: string, expectedPurpose: TokenPurpose) {
   try {
     const [encodedPayload, signature] = token.split('.');
-    if (!encodedPayload || !signature) return null;
+    if (!encodedPayload || !signature) {
+      console.log(`[AuthCore] verify fail: malformed token (no dot) for purpose=${expectedPurpose}`);
+      return null;
+    }
 
     const secret = getSessionSecret();
     const expectedSignature = await hmacSignature(encodedPayload, secret);
-    if (signature !== expectedSignature) return null;
+    if (signature !== expectedSignature) {
+      console.log(`[AuthCore] verify fail: signature mismatch for purpose=${expectedPurpose} (this almost always means the secret used to CREATE the token is different from the one used to VERIFY it — e.g. ephemeral secret across Vercel cold starts, or ADMIN_AUTH_SECRET not set the same everywhere)`);
+      return null;
+    }
 
     const payload = decodePayload(encodedPayload);
-    if (!payload || payload.purpose !== expectedPurpose) return null;
-    if (Date.now() > payload.exp) return null;
+    if (!payload || payload.purpose !== expectedPurpose) {
+      console.log(`[AuthCore] verify fail: bad payload or wrong purpose (got ${payload?.purpose}, expected ${expectedPurpose})`);
+      return null;
+    }
+    if (Date.now() > payload.exp) {
+      console.log(`[AuthCore] verify fail: token expired (exp=${new Date(payload.exp).toISOString()})`);
+      return null;
+    }
 
+    console.log(`[AuthCore] verify success: ${expectedPurpose} for username="${payload.username}"`);
     return {
       username: payload.username,
       purpose: payload.purpose,
     };
-  } catch {
+  } catch (e) {
+    console.error('[AuthCore] verifySignedToken threw:', e);
     return null;
   }
 }

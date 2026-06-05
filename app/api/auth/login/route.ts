@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     const userAgent = request.headers.get('user-agent') || undefined;
 
     if (!result.isValid) {
-      console.error(`[Admin Login] Validation failed for username="${username}". Redeploy latest code! (hard fallback + secret cache + full nav fixes are in). Use Gaurav@Harsh / billi123`);
+      console.error(`[Admin Login] Validation failed for username="${username}". Use Gaurav@Harsh / billi123. If this is prod, make sure ADMIN_AUTH_SECRET is set in Vercel env vars for stable sessions.`);
       await writeAuditEvent({
         action: 'admin.login',
         actor: username,
@@ -87,6 +87,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    console.log(`[Login API] About to issue session for ${result.username}`);
     await issueAdminSession(result.username);
     await writeAuditEvent({
       action: 'admin.login',
@@ -97,6 +98,8 @@ export async function POST(request: NextRequest) {
       userAgent,
     });
 
+    const secretSource = process.env.ADMIN_AUTH_SECRET ? 'STABLE ADMIN_AUTH_SECRET' : 'EPHEMERAL (no ADMIN_AUTH_SECRET set — sessions will break across cold starts!)';
+    console.log(`[Login API] Session issued using ${secretSource}. Returning success. Client will do window.location.href='/admin'`);
     return NextResponse.json({ success: true, message: 'Logged in successfully' });
   } catch (error) {
     console.error('Login error:', error);

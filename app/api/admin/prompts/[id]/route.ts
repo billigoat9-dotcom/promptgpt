@@ -23,7 +23,20 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'Too many update requests' }, { status: 429 });
     }
 
-    const { id } = await params;
+    let id = '';
+    try {
+      const resolvedParams = await params;
+      id = (resolvedParams as { id?: string }).id || '';
+    } catch {
+      // Next.js params may already be resolved.
+      id = (params as any)?.id || '';
+    }
+
+    if (!id) {
+      const maybePathId = request.nextUrl?.pathname?.split('/').pop();
+      id = maybePathId || id;
+    }
+
     const body = await request.json();
 
     const prompts = await getAllPrompts();

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Prompt } from '@/lib/types';
+import { supabase } from '@/lib/supabase'
 
 type AdminSecurityState = {
   username: string;
@@ -22,8 +23,10 @@ type AuditEvent = {
   details: Record<string, unknown>;
 };
 
+type PromptWithPending = Prompt & { pending?: boolean };
+
 export default function AdminDashboard() {
-  const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [prompts, setPrompts] = useState<PromptWithPending[]>([]);
   const [totalPrompts, setTotalPrompts] = useState(0);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'add' | 'manage' | 'security' | 'logs'>('add');
@@ -73,14 +76,13 @@ export default function AdminDashboard() {
       });
       if (res.ok) {
         const serverData: Prompt[] = await res.json();
+        const serverIds = new Set(serverData.map(p => p.id));
+        const pendingCount = prompts.filter(p => p.pending && !serverIds.has(p.id)).length;
         setPrompts(prev => {
-          const serverIds = new Set(serverData.map(p => p.id));
-          const newOptimistic = prev.filter(p => !serverIds.has(p.id));
-          // keep optimistic new prompts (they may not be in server yet due to propagation)
-          return [...newOptimistic, ...serverData];
+          const pending = prev.filter(p => p.pending && !serverIds.has(p.id));
+          return [...pending, ...serverData];
         });
-        // total will be corrected on re-fetch; use server length for now
-        setTotalPrompts(serverData.length);
+        setTotalPrompts(serverData.length + pendingCount);
       }
     } catch (e) {
       console.error(e);
@@ -112,6 +114,16 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => {
+    console.log('[AdminDashboard] Page mounted. Starting protected data load...');
+
+    // Debug helper: check what the server thinks about our session
+    fetch('/api/auth/session', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(data => {
+        console.log('[AdminDashboard] /api/auth/session response:', data);
+      })
+      .catch(e => console.error('[AdminDashboard] session check failed', e));
+
     const load = async () => {
       setLoading(true);
       await Promise.all([fetchPrompts(), fetchSecurityState()]);
@@ -154,12 +166,33 @@ export default function AdminDashboard() {
     setImageFileAndPreview(null);
   };
 
-  const handleAddPrompt = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.fullPrompt) {
-      alert('Full Prompt is required');
-      return;
-    }
+  const handleAddPrompt = async (e) => {
+  e.preventDefault();
+
+  let imageUrl = null;
+
+  if (imageFile) {
+    imageUrl = await uploadToCloudinary(imageFile);
+  }
+
+  const { error } = await supabase
+    .from('prompts')
+    .insert({
+      title: fullPrompt.substring(0, 80),
+      prompt: fullPrompt,
+      category: tags,
+      model: model,
+      creator: creator,
+      image_url: imageUrl,
+    });
+
+  if (error) {
+    alert("Prompt add nahi ho paya!");
+    console.log("Supabase Error:", error);
+  } else {
+    alert("Prompt successfully add ho gaya!");
+  }
+};
 
     setAdding(true);
 
@@ -197,7 +230,7 @@ export default function AdminDashboard() {
           alert('✅ Prompt added successfully! Image + data saved to Cloudinary.\n\nNote: Public gallery & Manage list use CDN; new prompt may take 5-30s to appear for all visitors (or click Refresh). Optimistic preview is shown immediately.');
         }
         if (data.prompt) {
-          setPrompts(prev => [data.prompt, ...prev.filter(p => p.id !== data.prompt.id)]);
+          setPrompts(prev => [{ ...data.prompt, pending: true }, ...prev.filter(p => p.id !== data.prompt.id)]);
           setTotalPrompts(prev => prev + 1);
         }
         resetAddForm();
@@ -238,7 +271,7 @@ export default function AdminDashboard() {
 
   const saveEdit = async (id: string) => {
     try {
-      const res = await fetch(`/api/admin/prompts/${id}`, {
+      const res = await fetch(`/api/admin/prompts/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -270,7 +303,7 @@ export default function AdminDashboard() {
     if (!confirm('Are you sure you want to delete this prompt?')) return;
 
     try {
-      const res = await fetch(`/api/admin/prompts/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/admin/prompts/${encodeURIComponent(id)}`, { method: 'DELETE' });
       if (res.ok) {
         const data = await res.json().catch(() => ({}));
         // optimistic remove
@@ -585,8 +618,14 @@ export default function AdminDashboard() {
                           <span>Views: <strong>{prompt.views}</strong></span>
                         </div>
 
-                        <div className="flex flex-wrap gap-2">
-                          <button onClick={() => startEdit(prompt)} className="px-4 py-1.5 text-sm bg-white/10 hover:bg-white/15 rounded-xl">Edit</button>
+                        <div className="flex flex-wrap gap-2 items-center">
+                          <button
+                            onClick={() => startEdit(prompt)}
+                            disabled={prompt.pending}
+                            className={`px-4 py-1.5 text-sm rounded-xl ${prompt.pending ? 'bg-white/10 text-white/50 cursor-not-allowed' : 'bg-white/10 hover:bg-white/15'}`}
+                          >
+                            {prompt.pending ? 'Syncing…' : 'Edit'}
+                          </button>
                           <button onClick={() => deletePrompt(prompt.id)} className="px-4 py-1.5 text-sm bg-red-900/70 hover:bg-red-900 rounded-xl">Delete</button>
                         </div>
                       </div>

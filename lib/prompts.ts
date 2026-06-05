@@ -15,6 +15,32 @@ async function ensureDataDir() {
   } catch {}
 }
 
+function normalizeImageUrl(imageUrl: string): string {
+  if (!imageUrl) return imageUrl;
+  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+    return imageUrl;
+  }
+
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+  if (cloudName && imageUrl.startsWith('/uploads/')) {
+    const filename = imageUrl.split('/').pop();
+    if (filename) {
+      return `https://res.cloudinary.com/${cloudName}/image/upload/prompt-gallery/${filename}`;
+    }
+  }
+
+  return 'https://picsum.photos/id/1015/600/800';
+}
+
+function normalizePrompts(prompts: Prompt[]): Prompt[] {
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+  return prompts.map((prompt) => ({
+    ...prompt,
+    imageUrl: normalizeImageUrl(prompt.imageUrl),
+    creatorAvatar: normalizeImageUrl(prompt.creatorAvatar),
+  }));
+}
+
 export const isVercelProd = process.env.NODE_ENV === 'production' && !!process.env.VERCEL;
 
 export async function isPromptsPersistent(): Promise<boolean> {
@@ -39,7 +65,7 @@ export async function getAllPrompts(): Promise<Prompt[]> {
         return [];
       }
       if (cloudData !== null && Array.isArray(cloudData)) {
-        return cloudData;
+        return normalizePrompts(cloudData);
       }
     } catch (error) {
       console.error('Cloudinary prompts data load error:', error);
@@ -48,6 +74,11 @@ export async function getAllPrompts(): Promise<Prompt[]> {
 
   // 2. Try Redis if available
   const redisClient = await getRedisClient();
+  if (isVercelProd && !hasCloudinaryCreds && !redisClient) {
+    throw new Error(
+      'Prompt persistence is not configured in production. Please set the Cloudinary environment variables or provide Redis so /api/prompts can load data.'
+    );
+  }
   if (redisClient) {
     try {
       const data = await redisClient.get('prompts');
@@ -78,7 +109,7 @@ export async function getAllPrompts(): Promise<Prompt[]> {
           console.error('Failed to seed prompts to Redis:', e);
         }
       }
-      return parsed;
+      return normalizePrompts(parsed);
     }
   } catch (error) {
     // File doesn't exist or invalid - seed with mock data
@@ -113,6 +144,7 @@ export async function getAllPrompts(): Promise<Prompt[]> {
 // Save all prompts (prefer Cloudinary, then Redis, then file)
 export async function savePrompts(prompts: Prompt[]): Promise<void> {
   const hasCloudinaryCreds = !!process.env.CLOUDINARY_CLOUD_NAME && !!process.env.CLOUDINARY_API_KEY && !!process.env.CLOUDINARY_API_SECRET;
+  const redisClient = await getRedisClient();
   if (hasCloudinaryCreds) {
     let toUpload = prompts;
     try {
@@ -158,6 +190,14 @@ export async function savePrompts(prompts: Prompt[]): Promise<void> {
           console.warn('Non-fatal: failed to also write current list to local prompts.json for inspection:', e);
         }
       }
+
+      if (redisClient) {
+        try {
+          await redisClient.set('prompts', JSON.stringify(toUpload));
+        } catch (e) {
+          console.warn('Non-fatal: failed to sync prompts to Redis after Cloudinary upload:', e);
+        }
+      }
       return;
     } catch (error: any) {
       console.error('Cloudinary prompts data upload error, falling back:', error);
@@ -169,7 +209,6 @@ export async function savePrompts(prompts: Prompt[]): Promise<void> {
     }
   }
 
-  const redisClient = await getRedisClient();
   if (redisClient) {
     try {
       await redisClient.set('prompts', JSON.stringify(prompts));

@@ -17,6 +17,7 @@ export default function AdminLogin() {
     e.preventDefault();
     setError('');
     setLoading(true);
+    console.log('[LoginPage] Form submit. requiresTwoFactor=', requiresTwoFactor, 'hasTempToken=', !!tempToken);
 
     try {
       if (requiresTwoFactor && tempToken) {
@@ -29,6 +30,7 @@ export default function AdminLogin() {
         const data = await res.json();
 
         if (res.ok && data.success) {
+          console.log('[LoginPage] 2FA verification success. Doing full reload to /admin');
           // Force full page load to ensure httpOnly session cookie is properly attached
           // and middleware can validate it reliably (SPA push can have timing/cookie issues on some deploys)
           window.location.href = '/admin';
@@ -48,7 +50,9 @@ export default function AdminLogin() {
           setRequiresTwoFactor(true);
           setTempToken(data.tempToken);
           setError('');
+          console.log('[LoginPage] Server wants 2FA, tempToken received. UI switched to code input.');
         } else if (res.ok && data.success) {
+          console.log('[LoginPage] Login success from server. Doing window.location.href = /admin (full reload for cookie)');
           // Force full page load to ensure httpOnly session cookie is properly attached
           // and middleware can validate it reliably (SPA push can have timing/cookie issues on some deploys)
           window.location.href = '/admin';

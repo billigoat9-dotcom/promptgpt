@@ -145,6 +145,7 @@ export async function validateAdminCredentials(username: string, password: strin
 }
 
 export async function issueAdminSession(username: string) {
+  console.log(`[Auth] issueAdminSession called for username="${username}"`);
   const token = await createSessionToken(username);
   const cookieStore = await cookies();
 
@@ -155,6 +156,8 @@ export async function issueAdminSession(username: string) {
     maxAge: 60 * 60 * 24,
     path: '/',
   });
+
+  console.log(`[Auth] httpOnly cookie "${SESSION_COOKIE_NAME}" set (secure=${process.env.NODE_ENV === 'production'}, path=/) for ${username}`);
 }
 
 async function getAdminRecord(preferConfiguredCredentials = true): Promise<AdminRecord> {
@@ -308,16 +311,24 @@ export async function getSession(): Promise<AdminSession | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
 
-  if (!token) return null;
+  if (!token) {
+    console.log('[Auth] getSession: no session cookie present');
+    return null;
+  }
 
-  return verifySessionToken(token);
+  console.log('[Auth] getSession: cookie present, verifying...');
+  const result = await verifySessionToken(token);
+  console.log(`[Auth] getSession result: ${result ? 'valid admin session for ' + result.username : 'invalid/expired'}`);
+  return result;
 }
 
 export async function requireAdmin() {
   const session = await getSession();
   if (!session?.isAdmin) {
+    console.log('[Auth] requireAdmin: session invalid or missing -> throwing Unauthorized');
     throw new Error('Unauthorized');
   }
+  console.log(`[Auth] requireAdmin: access granted for ${session.username}`);
   return session;
 }
 
