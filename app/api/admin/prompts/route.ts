@@ -125,12 +125,15 @@ export async function POST(request: NextRequest) {
     });
 
     const persistent = await isPromptsPersistent();
-    return NextResponse.json({ 
-      success: true, 
+    if (!persistent) {
+      return NextResponse.json({
+        error: 'Prompt storage is not configured for production persistence. Please set Cloudinary or Redis in Vercel environment variables.',
+      }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      success: true,
       prompt: newPrompt,
-      warning: !persistent 
-        ? 'Prompt added for this request only. (No Cloudinary/Redis configured for data persistence on Vercel). Use Cloudinary creds (already needed for images) - it will now store prompts data too as raw JSON.'
-        : undefined
     });
 
   } catch (error: any) {

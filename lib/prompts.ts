@@ -139,9 +139,33 @@ export async function savePrompts(prompts: Prompt[]): Promise<void> {
 
     try {
       await uploadPromptsData(toUpload);
+
+      if (isVercelProd) {
+        // Validate that the freshly uploaded Cloudinary prompt data is readable.
+        const validation = await getPromptsData();
+        if (!Array.isArray(validation)) {
+          throw new Error('Cloudinary prompt data upload completed, but the persisted data cannot be read back.');
+        }
+      }
+
+      // For local development convenience (when Cloudinary creds are present), also keep the on-disk
+      // lib/data/prompts.json in sync so that inspecting the file shows the current truth.
+      // We never read this file for the active list when hasCloudinaryCreds (cloud wins).
+      if (!isVercelProd) {
+        try {
+          await savePromptsToFile(toUpload);
+        } catch (e) {
+          console.warn('Non-fatal: failed to also write current list to local prompts.json for inspection:', e);
+        }
+      }
       return;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Cloudinary prompts data upload error, falling back:', error);
+      if (isVercelProd) {
+        throw new Error(
+          'Cloudinary prompt persistence failed in production. Please verify your Cloudinary credentials and that raw JSON uploads are allowed for this account.'
+        );
+      }
     }
   }
 
@@ -150,15 +174,15 @@ export async function savePrompts(prompts: Prompt[]): Promise<void> {
     try {
       await redisClient.set('prompts', JSON.stringify(prompts));
       return;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Redis prompts save error, falling back to file:', error);
     }
   }
 
   if (isVercelProd) {
-    // On Vercel the FS is read-only / changes don't persist across invocations.
-    console.warn('[Prompts] savePrompts skipped on Vercel (read-only filesystem). Using Cloudinary/Redis for persistence if configured.');
-    return;
+    throw new Error(
+      '[Prompts] savePrompts failed on Vercel: no persistent storage backend is configured. Set Cloudinary credentials or provide Redis to persist prompt data.'
+    );
   }
   await savePromptsToFile(prompts);
 }
