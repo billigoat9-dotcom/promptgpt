@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Prompt } from '@/lib/types';
-import { supabase } from '@/lib/supabase'
 
 type AdminSecurityState = {
   username: string;
@@ -166,92 +165,61 @@ export default function AdminDashboard() {
     setImageFileAndPreview(null);
   };
 
-  const handleAddPrompt = async (e) => {
+const handleAddPrompt = async (e: React.FormEvent<HTMLFormElement>) => {
   e.preventDefault();
 
-  let imageUrl = null;
+  setAdding(true);
 
-  if (imageFile) {
-    imageUrl = await uploadToCloudinary(imageFile);
-  }
+  const form = new FormData();
+  form.append('fullPrompt', formData.fullPrompt);
+  form.append('model', formData.model);
+  form.append('tags', formData.tags);
+  form.append('creator', formData.creator);
+  if (imageFile) form.append('image', imageFile);
 
-  const { error } = await supabase
-    .from('prompts')
-    .insert({
-      title: fullPrompt.substring(0, 80),
-      prompt: fullPrompt,
-      category: tags,
-      model: model,
-      creator: creator,
-      image_url: imageUrl,
-    });
+  try {
+    const res = await fetch('/api/admin/prompts', { method: 'POST', body: form });
 
-  if (error) {
-    alert("Prompt add nahi ho paya!");
-    console.log("Supabase Error:", error);
-  } else {
-    alert("Prompt successfully add ho gaya!");
+    let data: any = {};
+
+    // Try to parse JSON response
+    try {
+      data = await res.json();
+    } catch {
+      // ignore parse errors
+      data = {};
+    }
+
+    if (res.ok) {
+      // If server returned the created prompt, use it; otherwise construct a minimal one
+      const created: any = data?.prompt || data || {
+        id: `temp-${Date.now()}`,
+        prompt: formData.fullPrompt.slice(0, 120),
+        fullPrompt: formData.fullPrompt,
+        model: formData.model,
+        tags: formData.tags ? formData.tags.split(',').map(t => t.trim()) : [],
+        creator: formData.creator,
+        likes: 0,
+        views: 0,
+        imageUrl: imagePreview || '',
+      };
+
+      setPrompts(prev => [created, ...prev]);
+      setTotalPrompts(prev => prev + 1);
+      resetAddForm();
+      alert('Prompt added successfully');
+    } else {
+      alert(data?.error || 'Failed to add prompt');
+    }
+  } catch (err) {
+    console.error(err);
+    alert('Error adding prompt');
+  } finally {
+    setAdding(false);
   }
 };
 
-    setAdding(true);
-
-    const form = new FormData();
-    form.append('fullPrompt', formData.fullPrompt);
-    form.append('model', formData.model);
-    form.append('tags', formData.tags);
-    form.append('creator', formData.creator);
-    if (imageFile) form.append('image', imageFile);
-
-    try {
-      const res = await fetch('/api/admin/prompts', { method: 'POST', body: form });
-      
-      let data: any = {};
-      let rawText = '';
-
-      // Safely read the body only once
-      try {
-        data = await res.json();
-      } catch {
-        try {
-          rawText = await res.text();
-        } catch {
-          rawText = 'Could not read response body';
-        }
-        console.error('Failed to parse JSON response. Raw body:', rawText);
-      }
-
-      console.log('Add prompt response status:', res.status, 'data:', data);
-
-      if (res.ok && data.success) {
-        if (data.warning) {
-          alert(data.warning);
-        } else {
-          alert('✅ Prompt added successfully! Image + data saved to Cloudinary.\n\nNote: Public gallery & Manage list use CDN; new prompt may take 5-30s to appear for all visitors (or click Refresh). Optimistic preview is shown immediately.');
-        }
-        if (data.prompt) {
-          setPrompts(prev => [{ ...data.prompt, pending: true }, ...prev.filter(p => p.id !== data.prompt.id)]);
-          setTotalPrompts(prev => prev + 1);
-        }
-        resetAddForm();
-        setActiveTab('manage');
-        // Background re-fetch a couple times to pick up server/Cloudinary truth quickly (handles short CDN propagation)
-        setTimeout(() => { fetchPrompts(); }, 1200);
-        setTimeout(() => { fetchPrompts(); }, 4500);
-      } else {
-        const errorMsg = data.error || rawText || `HTTP ${res.status} - Failed to add prompt`;
-        console.error('Add prompt failed:', errorMsg, 'Full response data:', data);
-        alert(`Error adding prompt: ${errorMsg}`);
-      }
-    } catch (err: any) {
-      console.error('❌ Network or unexpected error adding prompt:', err);
-      alert(`Error adding prompt: ${err.message || 'Unknown network error. Check browser console (F12).'}`);
-    } finally {
-      setAdding(false);
-    }
-  };
-
-  // Edit handlers
+// Edit handlers
   const startEdit = (prompt: Prompt) => {
     setEditingId(prompt.id);
     setEditData({
@@ -781,3 +749,7 @@ export default function AdminDashboard() {
     </div>
   );
 }
+
+
+      
+
