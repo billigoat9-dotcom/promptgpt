@@ -40,6 +40,20 @@ function ensureCloudinaryConfigured() {
 
 export default cloudinary;
 
+async function fetchPromptList(url: string): Promise<Prompt[] | null> {
+  const res = await fetch(url, {
+    cache: 'no-store',
+    headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
+  });
+
+  if (!res.ok) {
+    return null;
+  }
+
+  const data = await res.json().catch(() => null);
+  return Array.isArray(data) ? data : null;
+}
+
 /**
  * Uploads an image buffer to Cloudinary
  */
@@ -194,10 +208,10 @@ export async function getPromptsData(): Promise<Prompt[] | 'NO_DATA_FILE' | null
   }
 
   const ts = Date.now();
-  const candidates: Prompt[][] = [];
 
   // 1. Try the pointer (data.current.json) -> a unique immutable data-*.json blob.
-  // The unique name has no overwrite lag *once we know the correct name from the pointer*.
+  // This is the authoritative source. If it exists, use it directly and do not merge
+  // with older fallback blobs, because a stale fallback can resurrect deleted prompts.
   try {
     const pointerUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/prompts/data.current.json?ts=${ts}`;
     const pRes = await fetch(pointerUrl, {
@@ -211,19 +225,12 @@ export async function getPromptsData(): Promise<Prompt[] | 'NO_DATA_FILE' | null
         const dataUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/${currentName}?ts=${ts}`;
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
-            const dRes = await fetch(dataUrl, {
-              cache: 'no-store',
-              headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
-            });
-            if (dRes.ok) {
-              const data = await dRes.json();
-              if (Array.isArray(data) && data.length > 0) {
-                candidates.push(data);
-                console.log('✅ Fetched via pointer ->', currentName, 'items:', data.length);
-              }
-              break;
+            const data = await fetchPromptList(dataUrl);
+            if (data) {
+              console.log('✅ Fetched via pointer ->', currentName, 'items:', data.length);
+              return data;
             }
-            if (dRes.status === 404 && attempt < 2) {
+            if (attempt < 2) {
               await new Promise(r => setTimeout(r, 300 + attempt * 200));
               continue;
             }
@@ -246,13 +253,10 @@ export async function getPromptsData(): Promise<Prompt[] | 'NO_DATA_FILE' | null
       const vText = (await vRes.text()).trim();
       if (/^\d+$/.test(vText)) {
         const verDataUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/v${vText}/prompts/data.json?ts=${ts}`;
-        const dv = await fetch(verDataUrl, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' } });
-        if (dv.ok) {
-          const data = await dv.json();
-          if (Array.isArray(data) && data.length > 0) {
-            candidates.push(data);
-            console.log('✅ Fetched (legacy ver pointer v' + vText + ') items:', data.length);
-          }
+        const data = await fetchPromptList(verDataUrl);
+        if (data) {
+          console.log('✅ Fetched (legacy ver pointer v' + vText + ') items:', data.length);
+          return data;
         }
       }
     }
@@ -264,18 +268,15 @@ export async function getPromptsData(): Promise<Prompt[] | 'NO_DATA_FILE' | null
   const legacyUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/prompts/data.json?ts=${ts}`;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
+      const data = await fetchPromptList(legacyUrl);
+      if (data) {
+        console.log('✅ Fetched (legacy fixed name) items:', data.length);
+        return data;
+      }
       const res = await fetch(legacyUrl, {
         cache: 'no-store',
         headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
-          candidates.push(data);
-          console.log('✅ Fetched (legacy fixed name) items:', data.length);
-        }
-        break;
-      }
       if (res.status !== 404 && attempt < 2) {
         await new Promise(r => setTimeout(r, 300 + attempt * 200));
       } else if (res.status === 404) {
@@ -291,40 +292,14 @@ export async function getPromptsData(): Promise<Prompt[] | 'NO_DATA_FILE' | null
   try {
     const versionedLegacyUrl = await getVersionedRawUrl('prompts/data.json');
     if (versionedLegacyUrl) {
-      const res = await fetch(`${versionedLegacyUrl}?ts=${ts}`, {
-        cache: 'no-store',
-        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
-          candidates.push(data);
-          console.log('✅ Fetched (versioned fixed name) items:', data.length);
-        }
+      const data = await fetchPromptList(`${versionedLegacyUrl}?ts=${ts}`);
+      if (data) {
+        console.log('✅ Fetched (versioned fixed name) items:', data.length);
+        return data;
       }
     }
   } catch (e) {
     console.warn('Versioned fixed name fallback failed:', e);
   }
-
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  const byId = new Map<string, Prompt>();
-  for (const list of candidates) {
-    for (const p of list) {
-      const prev = byId.get(p.id);
-      if (!prev || ((p.createdAt || '') > (prev.createdAt || ''))) {
-        byId.set(p.id, p);
-      }
-    }
-  }
-
-  const merged = Array.from(byId.values()).sort((a, b) =>
-    (b.createdAt || '').localeCompare(a.createdAt || '')
-  );
-
-  console.log(`✅ getPromptsData: merged ${candidates.length} source(s) into ${merged.length} unique prompts (union by id)`);
-  return merged;
+  return null;
 }
