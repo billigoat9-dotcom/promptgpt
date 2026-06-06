@@ -6,6 +6,8 @@ import { checkRateLimit, getClientRateLimitKey } from '@/lib/rate-limit';
 import { writeAuditEvent } from '@/lib/audit';
 
 export const runtime = 'nodejs'; // Ensure Node.js runtime for fs
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_MODELS = new Set(['FluxArt', 'VideoGen', 'GPT Image', 'Midjourney']);
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
@@ -17,12 +19,32 @@ export async function GET() {
     await requireAdmin();
     const { getAllPrompts } = await import('@/lib/prompts');
     const prompts = await getAllPrompts();
-    return NextResponse.json(prompts);
+    return NextResponse.json(prompts, {
+      headers: {
+        'Cache-Control': 'no-store, max-age=0, must-revalidate',
+      },
+    });
   } catch (error: any) {
     if (error.message === 'Unauthorized') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        {
+          status: 401,
+          headers: {
+            'Cache-Control': 'no-store, max-age=0, must-revalidate',
+          },
+        }
+      );
     }
-    return NextResponse.json({ error: 'Failed to fetch prompts' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Failed to fetch prompts' },
+      {
+        status: 500,
+        headers: {
+          'Cache-Control': 'no-store, max-age=0, must-revalidate',
+        },
+      }
+    );
   }
 }
 

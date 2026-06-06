@@ -25,6 +25,8 @@ type AuditEvent = {
 type PromptWithPending = Prompt & { pending?: boolean };
 
 export default function AdminDashboard() {
+  const PROMPT_REFRESH_KEY = 'promptgpt_gallery_refresh';
+
   const [prompts, setPrompts] = useState<PromptWithPending[]>([]);
   const [totalPrompts, setTotalPrompts] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -65,6 +67,14 @@ export default function AdminDashboard() {
   const router = useRouter();
 
   const models = ['FluxArt', 'VideoGen', 'GPT Image', 'Midjourney'];
+
+  const broadcastPromptRefresh = () => {
+    try {
+      localStorage.setItem(PROMPT_REFRESH_KEY, Date.now().toString());
+    } catch (error) {
+      console.warn('Failed to broadcast gallery refresh:', error);
+    }
+  };
 
   // Fetch data
   const fetchPrompts = async () => {
@@ -206,6 +216,7 @@ const handleAddPrompt = async (e: React.FormEvent<HTMLFormElement>) => {
 
       setPrompts(prev => [created, ...prev]);
       setTotalPrompts(prev => prev + 1);
+      broadcastPromptRefresh();
       resetAddForm();
       alert('Prompt added successfully');
     } else {
@@ -271,6 +282,7 @@ const handleAddPrompt = async (e: React.FormEvent<HTMLFormElement>) => {
           };
         }));
         cancelEdit();
+        broadcastPromptRefresh();
         const data = await res.json().catch(() => ({}));
         alert(data.warning ? data.warning : 'Prompt updated successfully');
       } else {
@@ -292,6 +304,7 @@ const handleAddPrompt = async (e: React.FormEvent<HTMLFormElement>) => {
         // optimistic remove
         setPrompts(prev => prev.filter(p => p.id !== id));
         setTotalPrompts(prev => Math.max(0, prev - 1));
+        broadcastPromptRefresh();
         if (data.warning) {
           alert(data.warning);
         }

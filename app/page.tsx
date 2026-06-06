@@ -16,6 +16,8 @@ import { filterPrompts, sortPrompts, copyToClipboard } from '@/lib/utils';
 import { MoreHorizontal } from 'lucide-react';
 
 export default function PromptGpt() {
+  const PROMPT_REFRESH_KEY = 'promptgpt_gallery_refresh';
+
   // Core data
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [isLoadingPrompts, setIsLoadingPrompts] = useState(true);
@@ -42,34 +44,68 @@ export default function PromptGpt() {
 
   const toggleMenu = () => setMenuOpen(!menuOpen);
 
-  // Fetch prompts dynamically + check admin session
-  useEffect(() => {
-    async function loadData() {
-      try {
-        // Strong bust for the data API (the server itself will also bust Cloudinary)
-        const promptsRes = await fetch('/api/prompts?ts=' + Date.now(), {
-          cache: 'no-store',
-          headers: { 'Cache-Control': 'no-cache' },
-        });
+  const loadPrompts = async (showSpinner = false) => {
+    try {
+      if (showSpinner) {
+        setIsLoadingPrompts(true);
+      }
 
-        if (promptsRes.ok) {
-          const data = await promptsRes.json();
-          setPrompts(data);
-        }
-      } catch (err) {
-        console.error('Failed to load data', err);
-      } finally {
+      // Strong bust for the data API (the server itself will also bust Cloudinary)
+      const promptsRes = await fetch('/api/prompts?ts=' + Date.now(), {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' },
+      });
+
+      if (promptsRes.ok) {
+        const data = await promptsRes.json();
+        setPrompts(data);
+      }
+    } catch (err) {
+      console.error('Failed to load data', err);
+    } finally {
+      if (showSpinner) {
         setIsLoadingPrompts(false);
       }
     }
+  };
 
-    loadData();
+  // Fetch prompts dynamically + keep gallery synced across tabs
+  useEffect(() => {
+    void loadPrompts(true);
+
+    const refreshPrompts = () => {
+      void loadPrompts(false);
+    };
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === PROMPT_REFRESH_KEY) {
+        refreshPrompts();
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        refreshPrompts();
+      }
+    };
+
+    const intervalId = window.setInterval(refreshPrompts, 30000);
+    window.addEventListener('focus', refreshPrompts);
+    window.addEventListener('storage', handleStorage);
+    document.addEventListener('visibilitychange', handleVisibility);
 
     // Persist saved
     const saved = localStorage.getItem('promptgpt_saved');
     if (saved) {
       setSavedIds(new Set(JSON.parse(saved)));
     }
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', refreshPrompts);
+      window.removeEventListener('storage', handleStorage);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, []);
 
   useEffect(() => {
