@@ -52,15 +52,31 @@ export async function isPromptsPersistent(): Promise<boolean> {
 
 // Load prompts (prefer Cloudinary data if creds present, else Redis, else local file, else mock)
 export async function getAllPrompts(): Promise<Prompt[]> {
-  // 1. Try Cloudinary for prompts data (primary for Vercel + keeping Cloudinary)
   const hasCloudinaryCreds = !!process.env.CLOUDINARY_CLOUD_NAME && !!process.env.CLOUDINARY_API_KEY && !!process.env.CLOUDINARY_API_SECRET;
+
+  // 1. Try Redis first when available.
+  // We write to Redis on every successful save, so it is the most up-to-date
+  // source immediately after add/edit/delete. Cloudinary remains the durable fallback.
+  const redisClient = await getRedisClient();
+  if (redisClient) {
+    try {
+      const data = await redisClient.get('prompts');
+      if (data !== null) {
+        const parsed = JSON.parse(data as string);
+        if (Array.isArray(parsed)) {
+          return normalizePrompts(parsed);
+        }
+      }
+    } catch (error) {
+      console.error('Redis prompts load error:', error);
+    }
+  }
+
+  // 2. Try Cloudinary next.
   if (hasCloudinaryCreds) {
     try {
       const cloudData = await getPromptsData();
       if (cloudData === 'NO_DATA_FILE') {
-        // No data file on Cloudinary yet. Return empty so that:
-        // - Public starts empty until first write (which will enrich with initials, see savePrompts).
-        // - We never overwrite a just-performed write due to a transient 404 right after upload.
         console.log('Cloudinary prompts/data.json does not exist yet (first run or after delete-all).');
         return [];
       }
@@ -72,25 +88,10 @@ export async function getAllPrompts(): Promise<Prompt[]> {
     }
   }
 
-  // 2. Try Redis if available
-  const redisClient = await getRedisClient();
   if (isVercelProd && !hasCloudinaryCreds && !redisClient) {
     throw new Error(
       'Prompt persistence is not configured in production. Please set the Cloudinary environment variables or provide Redis so /api/prompts can load data.'
     );
-  }
-  if (redisClient) {
-    try {
-      const data = await redisClient.get('prompts');
-      if (data) {
-        const parsed = JSON.parse(data as string);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-    } catch (error) {
-      console.error('Redis prompts load error:', error);
-    }
   }
 
   // 3. Fallback to local file
