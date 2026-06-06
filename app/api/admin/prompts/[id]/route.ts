@@ -1,39 +1,85 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { requireAdmin } from '@/lib/auth';
+import { getAllPrompts, savePrompts } from '@/lib/prompts';
+import { writeAuditEvent } from '@/lib/audit';
+
+export const runtime = 'nodejs';
 
 type RouteParams = {
   params: Promise<{ id: string }>;
 };
 
-// DELETE - Delete a prompt
-export async function DELETE(
-  request: NextRequest,
-  { params }: RouteParams
-) {
+function getRequestMeta(request: NextRequest) {
+  return {
+    ip:
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      request.headers.get('x-real-ip') ||
+      undefined,
+    userAgent: request.headers.get('user-agent') || undefined,
+  };
+}
+
+// DELETE - Delete a prompt from the active prompt store
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
+  const { id } = await params;
+
   try {
-    const { id } = await params;
+    const session = await requireAdmin();
 
-    const { error } = await supabase
-      .from('prompts')
-      .delete()
-      .eq('id', id);
+    const prompts = await getAllPrompts();
+    const exists = prompts.some((prompt) => prompt.id === id);
 
-    if (error) {
-      console.error('Supabase delete error:', error);
+    if (!exists) {
       return NextResponse.json(
-        { error: 'Failed to delete prompt from database' },
-        { status: 500 }
+        { error: 'Prompt not found' },
+        { status: 404 }
       );
     }
 
-    return NextResponse.json({ 
-      success: true, 
-      message: 'Prompt deleted successfully' 
+    const nextPrompts = prompts.filter((prompt) => prompt.id !== id);
+    await savePrompts(nextPrompts);
+
+    const meta = getRequestMeta(request);
+    await writeAuditEvent({
+      action: 'admin.prompt.delete',
+      actor: session.username,
+      status: 'success',
+      severity: 'warning',
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+      details: {
+        promptId: id,
+        remainingCount: nextPrompts.length,
+      },
     });
-  } catch (error) {
-    console.error('Delete error:', error);
+
+    return NextResponse.json({
+      success: true,
+      message: 'Prompt deleted successfully',
+    });
+  } catch (error: any) {
+    if (error.message === 'Unauthorized') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    console.error('DELETE Error:', error);
+
+    await writeAuditEvent({
+      action: 'admin.prompt.delete',
+      actor: 'unknown',
+      status: 'failure',
+      severity: 'warning',
+      details: {
+        reason: 'internal_error',
+        promptId: id,
+      },
+    });
+
     return NextResponse.json(
-      { error: 'Internal server error' },
+      {
+        error: 'Failed to delete prompt',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      },
       { status: 500 }
     );
   }
