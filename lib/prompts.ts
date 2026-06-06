@@ -152,7 +152,7 @@ export async function savePrompts(prompts: Prompt[]): Promise<void> {
       // with any "initial / bundled" prompts from the committed local file. This preserves
       // the starting gallery on first use after deploy, without causing read-triggered clobbers.
       const current = await getPromptsData();
-      if (current === 'NO_DATA_FILE' || (Array.isArray(current) && current.length === 0)) {
+      if (current === 'NO_DATA_FILE') {
         await ensureDataDir();
         const localRaw = await fs.readFile(DATA_FILE, 'utf-8').catch(() => '[]');
         const local = JSON.parse(localRaw);

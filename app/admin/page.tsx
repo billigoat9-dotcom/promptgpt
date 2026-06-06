@@ -245,8 +245,8 @@ const handleAddPrompt = async (e: React.FormEvent<HTMLFormElement>) => {
         body: JSON.stringify({
           fullPrompt: editData.fullPrompt,
           prompt: editData.prompt,
-          likes: Number(editData.likes),
-          views: Number(editData.views),
+          likes: editData.likes,
+          views: editData.views,
           model: editData.model,
           tags: editData.tags ? editData.tags.split(',').map((t: string) => t.trim()) : undefined,
         }),
@@ -254,13 +254,28 @@ const handleAddPrompt = async (e: React.FormEvent<HTMLFormElement>) => {
 
       if (res.ok) {
         // optimistic update
-        setPrompts(prev => prev.map(p => p.id === id ? { ...p, ...editData, fullPrompt: editData.fullPrompt || p.fullPrompt, prompt: editData.prompt || p.prompt, likes: Number(editData.likes) || p.likes, views: Number(editData.views) || p.views, model: editData.model || p.model } : p));
+        setPrompts(prev => prev.map(p => {
+          if (p.id !== id) return p;
+
+          const nextLikes = editData.likes === '' || editData.likes === undefined ? p.likes : Number(editData.likes);
+          const nextViews = editData.views === '' || editData.views === undefined ? p.views : Number(editData.views);
+
+          return {
+            ...p,
+            ...editData,
+            fullPrompt: editData.fullPrompt || p.fullPrompt,
+            prompt: editData.prompt || p.prompt,
+            likes: Number.isFinite(nextLikes) ? nextLikes : p.likes,
+            views: Number.isFinite(nextViews) ? nextViews : p.views,
+            model: editData.model || p.model,
+          };
+        }));
         cancelEdit();
         const data = await res.json().catch(() => ({}));
         alert(data.warning ? data.warning : 'Prompt updated successfully');
       } else {
-        const err = await res.json();
-        alert(err.error || 'Failed to update');
+        const err = await res.json().catch(() => ({}));
+        alert(err.details ? `${err.error || 'Failed to update'}: ${err.details}` : (err.error || 'Failed to update'));
       }
     } catch {
       alert('Error updating prompt');
@@ -752,4 +767,3 @@ const handleAddPrompt = async (e: React.FormEvent<HTMLFormElement>) => {
 
 
       
-

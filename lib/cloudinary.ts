@@ -226,7 +226,7 @@ export async function getPromptsData(): Promise<Prompt[] | 'NO_DATA_FILE' | null
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
             const data = await fetchPromptList(dataUrl);
-            if (data) {
+            if (data !== null) {
               console.log('✅ Fetched via pointer ->', currentName, 'items:', data.length);
               return data;
             }
@@ -254,7 +254,7 @@ export async function getPromptsData(): Promise<Prompt[] | 'NO_DATA_FILE' | null
       if (/^\d+$/.test(vText)) {
         const verDataUrl = `https://res.cloudinary.com/${cloudName}/raw/upload/v${vText}/prompts/data.json?ts=${ts}`;
         const data = await fetchPromptList(verDataUrl);
-        if (data) {
+        if (data !== null) {
           console.log('✅ Fetched (legacy ver pointer v' + vText + ') items:', data.length);
           return data;
         }
@@ -269,7 +269,7 @@ export async function getPromptsData(): Promise<Prompt[] | 'NO_DATA_FILE' | null
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const data = await fetchPromptList(legacyUrl);
-      if (data) {
+      if (data !== null) {
         console.log('✅ Fetched (legacy fixed name) items:', data.length);
         return data;
       }
@@ -293,7 +293,7 @@ export async function getPromptsData(): Promise<Prompt[] | 'NO_DATA_FILE' | null
     const versionedLegacyUrl = await getVersionedRawUrl('prompts/data.json');
     if (versionedLegacyUrl) {
       const data = await fetchPromptList(`${versionedLegacyUrl}?ts=${ts}`);
-      if (data) {
+      if (data !== null) {
         console.log('✅ Fetched (versioned fixed name) items:', data.length);
         return data;
       }
